@@ -472,18 +472,26 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 
 			mend = mstart + 12;
 			uint8_t mstartNeu = mstart + 10;
+			uint8_t mstartAlt = mstart;
 			bool m_endfound = false;
 
 			while (mstartNeu > mstart)	// testen ob innerhalb 10 Zeichen nach dem sync ein weiterer sync folgt, falls ja diesen als neuen mstart verwenden 
 			{
-				//if (message[mend + 1] == sync && message[mend] == clock) {
 				if (message[mstartNeu + 1] == sync) {
 					if (message[mstartNeu] == clock) {
+						while (mstartNeu < mstartNeu+40 && mstartNeu < (messageLen - minMessageLen))	// alle folgenden sync ueberspringen
+						{
+							if (message[mstartNeu + 2] != clock || message[mstartNeu + 3] != sync) {	// folgt kein weiterer sync?
 #ifdef DEBUGDECODE
 						DBG_PRINT(F("MStart:")); DBG_PRINT(mstart);
 						DBG_PRINT(F(" new MStart:")); DBG_PRINTLN(mstartNeu);
 #endif
-						mstart = mstartNeu;		// weiterer sync -> neuer mstart
+								mstart = mstartNeu;		// weiterer sync -> neuer mstart
+								mend = mstart + 2;
+								break;
+							}
+							mstartNeu += 2;
+						}
 						break;
 					}
 				}
@@ -616,13 +624,16 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					MSG_PRINT("O");  MSG_PRINT(SERIAL_DELIMITER);
 				}
 				if (MdebEnabled) {
-					if (mstart > 1) {
-						MSG_PRINT("s"); MSG_PRINT(mstart); MSG_PRINT(SERIAL_DELIMITER);
-					}
 					if (p_valid == 0) {					// Nachrichtenende erkannt
 						MSG_PRINT("e"); MSG_PRINT(SERIAL_DELIMITER);
 					} else if (p_valid == 2) {				// Patternpuffer overflow
 						MSG_PRINT("p"); MSG_PRINT(SERIAL_DELIMITER);
+					}
+					if (mstartAlt > 1) {
+						MSG_PRINT("b"); MSG_PRINT(mstartAlt); MSG_PRINT(SERIAL_DELIMITER);		// Position von ersten gefundenen Sync
+					}
+					if (mstart > mstartAlt) {
+						MSG_PRINT(F("s")); MSG_PRINT(mstart - mstartAlt); MSG_PRINT(SERIAL_DELIMITER);	// Anzahl der uebersprungenen Sync
 					}
 				}
 			  }
