@@ -53,7 +53,7 @@
 
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.2.1-rc8"
+#define PROGVERS               "3.3.2.1-rc9"
 #define VERSION_1               0x33
 #define VERSION_2               0x21
 
@@ -480,7 +480,7 @@ void send_mc(const uint8_t startpos,const uint8_t endpos, const int16_t clock)
 				
 					stoptime += clock;
 					while (stoptime > micros())
-						yield();
+						;
 			}
 			
 		}
@@ -761,12 +761,15 @@ void HandleCommand()
 	  MSG_PRINT(F("V " PROGVERS " SIGNALduino "));
 	  if (hasCC1101) {
 		MSG_PRINT(F("cc1101 "));
-	    #ifdef PIN_MARK433
-	    MSG_PRINT("(");
+#ifdef PIN_MARK433
+	    MSG_PRINT(F("(minicul "));
 	    MSG_PRINT(isLow(PIN_MARK433) ? "433" : "868");
-	    MSG_PRINT(F("Mhz )"));
-	  #endif
+	    MSG_PRINT(F("Mhz) "));
+#endif
       }
+#ifdef SENDTODECODER
+	MSG_PRINT(F("(no receive, only send to decoder) "));
+#endif
 	MSG_PRINTLN(F("- compiled at " __DATE__ " " __TIME__));
 
   }
