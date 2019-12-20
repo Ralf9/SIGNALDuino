@@ -53,9 +53,9 @@
 
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.2.1-rc9"
+#define PROGVERS               "3.3.2.2-rc10"
 #define VERSION_1               0x33
-#define VERSION_2               0x21
+#define VERSION_2               0x22
 
 #ifdef CMP_CC1101
 	#ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
@@ -120,18 +120,24 @@ bool hasCC1101 = false;
 bool LEDenabled = true;
 uint8_t MdebFifoLimit = 120;
 
-#define CSetAnz 5
-//const char *CSetCmd[] = {"fifolimit", "mcmbl", "mscnt", "muoverflmax", "muthresh", "L"};
-const uint8_t CSetAddr[] = {  0xf0,     0xf1,    0xf2,   0xf5,            0xf3,   0xf4};
-const uint8_t CSetDef[] =  {    120,       0,       4,     3,             0x1f,   0x40};
+#define CSetAnz 7
+#define CSetAnzEE 9
+#define CSet16 5
+#define CSetLow 7
+
+//const char *CSetCmd[] = {"fifolimit", "mcmbl", "mscnt", "muoverflmax", "maxnumpat", "muthresh", "L",  "maxpulse", "L"  };
+const uint8_t CSetAddr[] = {  0xf0,     0xf1,    0xf2,    0xf3,          0xf4,        0xf5,       0xf6, 0xf7,       0xf8 };
+const uint8_t CSetDef[] =  {    120,       0,       4,       3,             8,           0,          0,    0,          0 };
 
 const char string_0[] PROGMEM = "fifolimit";
 const char string_1[] PROGMEM = "mcmbl";
 const char string_2[] PROGMEM = "mscnt";
 const char string_3[] PROGMEM = "muoverflmax";
-const char string_4[] PROGMEM = "muthresh";
+const char string_4[] PROGMEM = "maxnumpat";
+const char string_5[] PROGMEM = "muthresh";
+const char string_6[] PROGMEM = "maxpulse";
 
-const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4 };
+const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6};
 
 #ifdef CMP_MEMDBG
 
@@ -417,7 +423,16 @@ void disableReceive() {
 
 }
 
-
+/*void send_rawx(const uint8_t startpos,const uint16_t endpos,const int16_t *buckets, String *source=&cmdstring)
+{
+  int16_t sendarr[] ={200,-200,300,-300,500,-400,600,-600,800,-800,500,-500,200,-200,300,-300,500,-400,600,-600,800,-800,500,-500,200,-200,500,-300,400,-400,500,-600,800,-800,500,-500,200,-200,300,-300,400,-400,600,-600,1100,-1100,800,-800,500,-500};
+  int16_t p;
+  for (uint8_t i=0;i<50;i++ ) {
+    p = sendarr[i];
+    //MSG_PRINTLN(p);
+    musterDec.decode(&p);
+  }
+}*/
 
 //================================= RAW Send ======================================
 void send_raw(const uint8_t startpos,const uint16_t endpos,const int16_t *buckets, String *source=&cmdstring)
@@ -917,6 +932,14 @@ inline void getConfig()
       MSG_PRINT(F(";mcMinBitLen="));
       MSG_PRINT(musterDec.mcMinBitLen, DEC);
    }
+   if (musterDec.cMaxNumPattern != CSetDef[4]) {
+      MSG_PRINT(F(";maxNumPat="));
+      MSG_PRINT(musterDec.cMaxNumPattern, DEC);
+   }
+   if (musterDec.cMaxPulse != -maxPulse) {
+      MSG_PRINT(F(";maxPulse="));
+      MSG_PRINT(musterDec.cMaxPulse, DEC);
+   }
    if (musterDec.MdebEnabled) {
       MSG_PRINT(F(";MdebFifoLimit="));
       MSG_PRINT(MdebFifoLimit, DEC);
@@ -973,6 +996,7 @@ inline bool configSET()
 	int16_t i = cmdstring.indexOf("=",4);
 	uint8_t n = 0;
 	uint8_t val;
+	uint16_t val16;
 	if (i < 0) {
 		return false;
 	}
@@ -981,10 +1005,18 @@ inline bool configSET()
 		if (cmdstring.substring(2, i) == buffer) {
 			MSG_PRINT(buffer);
 			MSG_PRINT(F("="));
-			if (n != CSetAnz-1) {
+			if (n < CSet16) {
 				val = cmdstring.substring(i+1).toInt();
 				MSG_PRINTLN(val);
 				EEPROM.write(CSetAddr[n], val);
+			}
+			else {
+				val16 = cmdstring.substring(i+1).toInt();
+				MSG_PRINTLN(val16);
+				val = (val16>>8) & 0xFF;
+				EEPROM.write(CSetAddr[n+(n-CSet16)], val);		// high
+				val = val16 & 0xFF;
+				EEPROM.write(CSetAddr[n+(n-CSet16)+1], val);	// low
 			}
 			break;
 		}
@@ -1003,13 +1035,19 @@ inline bool configSET()
 	else if (n == 3) {			// MuOverflMax
 		musterDec.MuOverflMax = val;
 	}
-	else if (n == CSetAnz-1) {			// muthresh
-		musterDec.MuSplitThresh = cmdstring.substring(i+1).toInt();
-		val = (musterDec.MuSplitThresh>>8) & 0xFF;
-		EEPROM.write(CSetAddr[n], val);			// high
-		val = musterDec.MuSplitThresh & 0xFF;
-		EEPROM.write(CSetAddr[n+1], val);		// low
-		MSG_PRINTLN(musterDec.MuSplitThresh);
+	else if (n == 4) {			// maxnumpat
+		musterDec.cMaxNumPattern = val;
+	}
+	else if (n == 5) {			// muthresh
+		musterDec.MuSplitThresh = val16;
+	}
+	else if (n == 6) {			// maxpulse
+		if (val16 != 0) {
+			musterDec.cMaxPulse = -val16;
+		}
+		else {
+			musterDec.cMaxPulse = -maxPulse;
+		}
 	}
 	else {
 		return false;
@@ -1184,8 +1222,15 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     MdebFifoLimit = EEPROM.read(CSetAddr[0]);
     musterDec.MsMoveCountmax = EEPROM.read(CSetAddr[2]);
     musterDec.MuOverflMax = EEPROM.read(CSetAddr[3]);
-    high = EEPROM.read(CSetAddr[CSetAnz-1]);
-    musterDec.MuSplitThresh = EEPROM.read(CSetAddr[CSetAnz]) + ((high << 8) & 0xFF00);
+    musterDec.cMaxNumPattern = EEPROM.read(CSetAddr[4]);
+    high = EEPROM.read(CSetAddr[CSet16]);
+    musterDec.MuSplitThresh = EEPROM.read(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
+    high = EEPROM.read(CSetAddr[CSet16+2]);
+    musterDec.cMaxPulse = EEPROM.read(CSetAddr[CSet16+3]) + ((high << 8) & 0xFF00);
+    if (musterDec.cMaxPulse == 0) {
+       musterDec.cMaxPulse = maxPulse;
+    }
+    musterDec.cMaxPulse = -musterDec.cMaxPulse;
     musterDec.mcMinBitLen = EEPROM.read(CSetAddr[1]);
     if (musterDec.mcMinBitLen == 0) {
         musterDec.mcMinBitLen = mcMinBitLenDef;
@@ -1195,12 +1240,9 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
 void initEEPROMconfig(void)
 {
 	EEPROM.write(addr_features, 0xBF);    	// Init EEPROM with all flags enabled, except MuNoOverflow
-	EEPROM.write(CSetAddr[0], CSetDef[0]);	// fifolimit
-	EEPROM.write(CSetAddr[1], CSetDef[1]);	// mcmbl
-	EEPROM.write(CSetAddr[2], CSetDef[2]);	// mscnt
-	EEPROM.write(CSetAddr[3], CSetDef[3]);	// MuOverflMax
-	EEPROM.write(CSetAddr[4], CSetDef[4]);	// muthresh high
-	EEPROM.write(CSetAddr[5], CSetDef[5]);	// muthresh low
+	for (uint8_t i = 0; i < CSetAnzEE; i++) {
+		EEPROM.write(CSetAddr[i], CSetDef[i]);
+	}
 	MSG_PRINTLN(F("Init eeprom to defaults"));
 }
 
