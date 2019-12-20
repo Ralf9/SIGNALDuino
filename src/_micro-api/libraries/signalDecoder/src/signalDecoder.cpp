@@ -160,12 +160,11 @@ inline void SignalDetectorClass::doDetect()
 
 	bool valid;
 	valid = (messageLen == 0 || last == NULL || (*first ^ *last) < 0); // true if a and b have opposite signs
-	valid &= (*first > -maxPulse);  // if low maxPulse detected, start processMessage()
+	valid &= (*first > cMaxPulse);  // if low maxPulse detected, start processMessage()
 
 	//if (abs(*first) < 90) {
 	//	DBG_PRINT("first<90 ");DBG_PRINTLN(*first);
 	//}
-	
 	int8_t fidx = 0;
 	
 	if (!valid) {			// Nachrichtenende erkannt -> alles bis zum Nachrichtenende wird ausgegeben
@@ -209,7 +208,7 @@ inline void SignalDetectorClass::doDetect()
 		}
 		else {
 			// Add pattern
-			if (patternLen == maxNumPattern)
+			if (patternLen == cMaxNumPattern)
 			{
 				//calcHisto();
 				//bool gr2Flag = false;
@@ -267,10 +266,10 @@ inline void SignalDetectorClass::doDetect()
 			fidx = pattern_pos;
 			addPattern();
 	
-			if (pattern_pos == maxNumPattern)
+			if (pattern_pos == cMaxNumPattern)
 			{
 				pattern_pos = 0;  // Wenn der Positions Index am Ende angelegt ist, gehts wieder bei 0 los und wir ueberschreiben alte pattern
-				patternLen = maxNumPattern;
+				patternLen = cMaxNumPattern;
 				mcDetected = false;  // When changing a pattern, we need to redetect a manchester signal and we are not in a buffer full mode scenario
 
 			}
@@ -983,7 +982,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					for (uint8_t idx = 0; idx < patternLen; idx++)
 					{
 						if (pattern[idx] == 0 || histo[idx] == 0) continue; 
-						MSG_PRINT("P"); MSG_PRINT(idx); MSG_PRINT("="); MSG_PRINT(pattern[idx]); MSG_PRINT(SERIAL_DELIMITER);  // Patternidx=Value
+						MSG_PRINT("P"); MSG_PRINT(idx,HEX); MSG_PRINT("="); MSG_PRINT(pattern[idx]); MSG_PRINT(SERIAL_DELIMITER);  // Patternidx=Value
 					}
 					MSG_PRINT("CP="); MSG_PRINT(clock);     MSG_PRINT(SERIAL_DELIMITER);    // ClockPulse, (not valid for manchester)
 					#ifdef CMP_CC1101
@@ -994,7 +993,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 				    }
 					for (uint8_t i = 0; i < mend; ++i)
 					{
-						MSG_PRINT(message[i]);
+						MSG_PRINT(message[i],HEX);
 					}
 					
 					if (!NoMsgEnd) {
@@ -1101,7 +1100,7 @@ void SignalDetectorClass::reset()
 //	bitcnt = 0;
 	state = searching;
 	clock = sync = -1;
-	for (uint8_t i = 0; i<maxNumPattern; ++i)
+	for (uint8_t i = 0; i<cMaxNumPattern; ++i)
 	  histo[i] = pattern[i] = 0;
 	success = false;
 	tol = 150; //
@@ -1215,7 +1214,7 @@ bool SignalDecoderClass::validSequence(const int * a, const int * b)
 void SignalDetectorClass::calcHisto(const uint8_t startpos, uint8_t endpos)
 {
 	if (messageLen == 0) return;
-	for (uint8_t i = 0; i<maxNumPattern; ++i)
+	for (uint8_t i = 0; i<cMaxNumPattern; ++i)
 	{
 		histo[i] = 0;
 	}
@@ -1952,7 +1951,7 @@ const bool ManchesterpatternDecoder::isManchester()
 	int equal_cnt = 0;
 	const uint8_t minHistocnt = round(pdec->messageLen*0.04);
 				                          //     3     1    0     2
-	uint8_t sortedPattern[maxNumPattern]; // 1300,-1300,-734,..800
+	uint8_t sortedPattern[pdec->cMaxNumPattern]; // 1300,-1300,-734,..800
 	uint8_t p=0;
 
 	for (uint8_t i = 0; i < pdec->patternLen; i++)

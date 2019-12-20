@@ -44,7 +44,7 @@
 #include "bitstore.h"
 #include "FastDelegate.h"
 
-#define maxNumPattern 8
+#define maxNumPattern 16
 #define maxMsgSize 254
 #define minMessageLen 40
 #define syncMinFact 6
@@ -103,7 +103,9 @@ public:
 	uint8_t MuMoveCount;
 	uint8_t MuOverflCount;
 	uint8_t MuOverflMax;
+	uint8_t cMaxNumPattern;
 	uint16_t MuSplitThresh;
+	int16_t cMaxPulse;
 	bool NoMsgEnd;
 	bool printMsgSuccess;
 	
