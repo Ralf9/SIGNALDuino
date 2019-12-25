@@ -2,16 +2,17 @@
 
 ### Getting started
 
-
 System to receive digital signals and provide them to other systems pro demodulatiob. Currently tested with 433 MHZ, but not limited to that frequency or media.
 
 ### Getting started
 
 
+
 Just clone the repo and open the project file with visualstudio. (only available for windows)
 You can also open it with the Arduino IDE. 
+
 Compile it and have fun.
-If you are using the Arduino IDE, you have to copy all the libs into your sketch folder.
+If you are using the Arduino IDE, you have to copy all the libs into your sketch folder and alter some includes.
 
 ### Using SIGNALDuino in FHEM
 
