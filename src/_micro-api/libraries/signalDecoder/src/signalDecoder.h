@@ -2,8 +2,7 @@
 *   Pattern Decoder Library V3
 *   Library to decode radio signals based on patternd detection
 *   2014-2015  N.Butzek, S.Butzek
-*   2015  S.Butzek
-*	2016  S.Butzek
+*   2015-2017  S.Butzek
 
 *   This library contains different classes to perform detecting of digital signals
 *   typical for home automation. The focus for the moment is on different sensors
@@ -33,82 +32,125 @@
 #define _SIGNALDECODER_h
 
 #if defined(ARDUINO) && ARDUINO >= 100
-	#include "arduino.h"
+	#include "Arduino.h"
 #else
-	#include "WProgram.h"
+	//#include "WProgram.h"
 #endif
-#include <output.h>
 
-#include <bitstore.h>
+#define CMP_CC1101
+#define DEBUG 1
 
-#define maxNumPattern 8
+#include "output.h"
+#include "bitstore.h"
+#include "FastDelegate.h"
+
+#define maxNumPattern 16
 #define maxMsgSize 254
 #define minMessageLen 40
-#define syncMinFact 7
-#define syncMaxFact 39
+#define syncMinFact 6
+#define syncMaxFact 45 // 39
 #define syncMaxMicros 17000
 #define maxPulse 32001  // Magic Pulse Length
 
 
-#define SERIAL_DELIMITER ';'
+#define SERIAL_DELIMITER  char(';')
 #define MSG_START char(0x2)			// this is a non printable Char
 #define MSG_END char(0x3)			// this is a non printable Char
 
-//#define DEBUGDETECT 3
+//#define DEBUGDETECT 1
 //#define DEBUGDETECT 255  // Very verbose output
-//#define DEBUGDECODE 2
+//#define MCDEBUGDECODE 2    // debug mc-decoder
+//#define MCDEBUGDETECT 5    // debug isManchester
+//#define DEBUGGLEICH 1
+//#define DEBUGDECODE 1    // debug processMessage
+//#define DEBUGDoDETECT 3  // debug compress_pattern
+//#define DEBUGMUREPEAT 1  // debug isMuMessageRepeat
 
 enum status { searching, clockfound, syncfound, detecting };
+
+
 
 class SignalDetectorClass
 {
 	friend class ManchesterpatternDecoder;
 
 public:
-	SignalDetectorClass() : first(buffer), last(first + 1) { buffer[0] = buffer[1] = 0; reset(); };
+	SignalDetectorClass() : first(buffer), last(NULL), message(4) { 
+																		 buffer[0] = 0; reset(); mcMinBitLen = 17; 	
+																		 MsMoveCount = 0; 
+																		 MuMoveCount = 0;
+																		 MuOverflCount = 0;
+																	   };
 
 	void reset();
 	bool decode(const int* pulse);
 	const status getState();
+	typedef fastdelegate::FastDelegate0<uint8_t> FuncRetuint8t;
+	void setRSSICallback(FuncRetuint8t callbackfunction) { _rssiCallback = callbackfunction; }
 
+
+	//private:
 	int8_t clock;                           // index to clock in pattern
 	bool MUenabled;
 	bool MCenabled;
 	bool MSenabled;
+	bool MredEnabled;                       // 1 = compress printMsgRaw
+	bool MuNoOverflow;
+	bool MdebEnabled;                       // 1 = print message debug info  enabled
+	//bool MfiltEnabled;        // fuer Nachrichten Filter reserviert
+	uint8_t MsMoveCountmax;
+	uint8_t MsMoveCount;
+	uint8_t MuMoveCount;
+	uint8_t MuOverflCount;
+	uint8_t MuOverflMax;
+	uint8_t cMaxNumPattern;
+	uint16_t MuSplitThresh;
+	int16_t cMaxPulse;
+	bool NoMsgEnd;
+	bool printMsgSuccess;
+	
 	uint8_t histo[maxNumPattern];
-	uint8_t message[maxMsgSize];
-	uint8_t messageLen;
-	uint8_t mstart; // Holds starting point for message
-	uint8_t mend; // Holds end point for message if detected
-	bool success;                           // True if a valid coding was found
+	//uint8_t message[maxMsgSize];
+	BitStore<maxMsgSize/2> message;       // A store using 4 bit for every value stored. 
 
-	bool m_truncated;     // Identify if message has been truncated
+#ifdef DEBUGGLEICH
+	uint8_t bMoveFlag;   // nur zu debugzwecke
+#endif
+	int firstLast;
+	int lastPulse;
+	uint8_t messageLen;					  // Todo, kann durch message.valcount ersetzt werden
+	uint8_t mstart;						  // Holds starting point for message
+	uint8_t mend;						  // Holds end point for message if detected
+	bool success;                         // True if a valid coding was found
+	bool m_truncated;					// Identify if message has been truncated
 	bool m_overflow;
 	void bufferMove(const uint8_t start);
 
 	uint16_t tol;                           // calculated tolerance for signal
-	uint8_t bitcnt;
+
 	status state;                           // holds the status of the detector
 	int buffer[2];                          // Internal buffer to store two pules length
 	int* first;                             // Pointer to first buffer entry
-	int* last;                              // Pointer to last buffer entry
+	int* last;                              // Pointer to last buffer entry 
 	float tolFact;                          //
 	int pattern[maxNumPattern];				// 1d array to store the pattern
 	uint8_t patternLen;                     // counter for length of pattern
 	uint8_t pattern_pos;
-	int8_t sync;                        // index to sync in pattern if it exists
-	String preamble;
-	String postamble;
+	int8_t sync;							// index to sync in pattern if it exists
 	bool mcDetected;						// MC Signal alread detected flag
-	
+	bool mcValid;
+	bool mcRepeat;				// ist true wenn evtl noch eine Wiederholung folgen kann
+	uint8_t mcMinBitLen;					// min bit Length
+	uint8_t rssiValue;						// Holds the RSSI value retrieved via a rssi callback
+	FuncRetuint8t _rssiCallback=NULL;			// Holds the pointer to a callback Function
 
 	void addData(const uint8_t value);
 	void addPattern();
 	inline void updPattern(const uint8_t ppos);
 
 	void doDetect();
-	void processMessage();
-	void compress_pattern();
+	void processMessage(const uint8_t p_valid);
+	bool compress_pattern();
 	void calcHisto(const uint8_t startpos = 0, uint8_t endpos = 0);
 	bool getClock(); // Searches a clock in a given signal
 	bool getSync();	 // Searches clock and sync in given Signal
@@ -119,8 +161,9 @@ public:
 	void printOut();
 
 	int8_t findpatt(const int val);              // Finds a pattern in our pattern store. returns -1 if te pattern is not found
-	//bool validSequence(const int *a, const int *b);     // checks if two pulses are basically valid in terms of on-off signals
-	
+
+	bool checkMBuffer();
+	bool isMuMessageRepeat();
 
 };
 
@@ -136,6 +179,9 @@ public:
 	void getMessageClockStr(String* str);
 	void getMessageLenStr(String* str);
 
+	void printMessageHexStr();
+	void printMessagePulseStr();
+
 	const bool isManchester();
 	void reset();
 #ifndef UNITTEST
@@ -149,9 +195,9 @@ public:
 	int8_t shorthigh;
 	int clock; // Manchester calculated clock		
 	int8_t minbitlen;
+	uint8_t mc_sync_pos;
 	
 	bool mc_start_found = false;
-	bool mc_sync = false;
 
 	const bool isLong(const uint8_t pulse_idx);
 	const bool isShort(const uint8_t pulse_idx);

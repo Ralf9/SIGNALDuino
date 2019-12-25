@@ -1,5 +1,5 @@
 /*
-*   RF_RECEIVER v3.2 for Arduino
+*   RF_RECEIVER v3.32 for Arduino
 *   Sketch to use an arduino as a receiver/sending device for digital signals
 *
 *   The Sketch can also encode and send data via a transmitter,
@@ -29,72 +29,115 @@
 *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 */
-#define CMP_FIFO 1
+
+
+// Config flags for compiling correct options / boards Define only one
+
+//#define ARDUINO_ATMEGA328P_MINICUL 1
+//#define ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101 1
+#define OTHER_BOARD_WITH_CC1101  1
+
 //#define CMP_MEMDBG 1
-#define CMP_NEWSD;
+
+// bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten 
+
+#ifdef OTHER_BOARD_WITH_CC1101
+	#define CMP_CC1101     
+#endif
+#ifdef ARDUINO_ATMEGA328P_MINICUL
+	#define CMP_CC1101     
+#endif
+#ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
+	#define CMP_CC1101     
+#endif
+
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.0"
+#define PROGVERS               "3.3.2.2-rc10"
+#define VERSION_1               0x33
+#define VERSION_2               0x22
 
-#define PIN_RECEIVE            2
-#define PIN_LED                13 // Message-LED
-#define PIN_SEND               11
-#define BAUDRATE               57600
-#define FIFO_LENGTH			   50
-//#define DEBUG				   1
-
-#include <output.h>
-
-#include <TimerOne.h>  // Timer for LED Blinking
-#include <bitstore.h>  // Die wird aus irgend einem Grund zum Compilieren benoetigt.
-#ifdef CMP_FIFO
-#include <SimpleFIFO.h>
-SimpleFIFO<int,FIFO_LENGTH> FiFo; //store FIFO_LENGTH # ints
+#ifdef CMP_CC1101
+	#ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
+		#define PIN_LED               13
+		#define PIN_SEND              9   // gdo0Pin TX out
+		#define PIN_RECEIVE				   7
+		#define digitalPinToInterrupt(p) ((p) == 0 ? 2 : ((p) == 1 ? 3 : ((p) == 2 ? 1 : ((p) == 3 ? 0 : ((p) == 7 ? 4 : NOT_AN_INTERRUPT)))))
+		#define PIN_MARK433			  4
+		#define SS					  8  
+	#elif ARDUINO_ATMEGA328P_MINICUL  // 8Mhz 
+		#define PIN_LED               4
+		#define PIN_SEND              2   // gdo0Pin TX out
+		#define PIN_RECEIVE           3
+		#define PIN_MARK433	      A0
+	#else 
+		#define PIN_LED               9
+		#define PIN_SEND              3   // gdo0Pin TX out
+	    #define PIN_RECEIVE           2
+	#endif
 #else
-#include <filtering.h> //for FiFo Buffer
-RingBuffer FiFo(FIFO_LENGTH, 0); // FiFo Puffer
+	#define PIN_RECEIVE            2
+	#define PIN_LED                13 // Message-LED
+	#define PIN_SEND               11
 #endif
-#ifdef CMP_NEWSD
-#include <signalDecoder.h>
+
+
+#define BAUDRATE               57600
+#define FIFO_LENGTH            140      // 50
+
+//#define WATCHDOG	1 // Der Watchdog ist in der Entwicklungs und Testphase deaktiviert. Es muss auch ohne Watchdog stabil funktionieren.
+//#define DEBUGSENDCMD  1
+//#define SENDTODECODER 1 // damit wird in der send_raw Routine anstatt zu senden, die Pulse direkt dem Decoder uebergeben
+#define DEBUG                  1
+
+#ifdef WATCHDOG
+	#include <avr/wdt.h>
+#endif
+#include "FastDelegate.h"
+#include "output.h"
+#include "bitstore.h"
+#include "signalDecoder.h"
+#include <TimerOne.h>  // Timer for LED Blinking
+
+#include "SimpleFIFO.h"
+SimpleFIFO<int,FIFO_LENGTH> FiFo; //store FIFO_LENGTH # ints
 SignalDetectorClass musterDec;
 
-#else
-#include <patternDecoder.h> 
-patternDecoder musterDec;
-
-#endif
 
 #include <EEPROM.h>
-
+#include "cc1101.h"
 
 #define pulseMin  90
+#define maxCmdString 350  //350 // 250
+#define maxSendPattern 8
+#define mcMinBitLenDef   17
 volatile bool blinkLED = false;
 String cmdstring = "";
+char msg_cmd0 = ' ';
+char msg_cmd1 = ' ';
 volatile unsigned long lastTime = micros();
+bool hasCC1101 = false;
+bool LEDenabled = true;
+uint8_t MdebFifoLimit = 120;
 
+#define CSetAnz 7
+#define CSetAnzEE 9
+#define CSet16 5
+#define CSetLow 7
 
+//const char *CSetCmd[] = {"fifolimit", "mcmbl", "mscnt", "muoverflmax", "maxnumpat", "muthresh", "L",  "maxpulse", "L"  };
+const uint8_t CSetAddr[] = {  0xf0,     0xf1,    0xf2,    0xf3,          0xf4,        0xf5,       0xf6, 0xf7,       0xf8 };
+const uint8_t CSetDef[] =  {    120,       0,       4,       3,             8,           0,          0,    0,          0 };
 
-#define portOfPin(P)\
-  (((P)>=0&&(P)<8)?&PORTD:(((P)>7&&(P)<14)?&PORTB:&PORTC))
-#define ddrOfPin(P)\
-  (((P)>=0&&(P)<8)?&DDRD:(((P)>7&&(P)<14)?&DDRB:&DDRC))
-#define pinOfPin(P)\
-  (((P)>=0&&(P)<8)?&PIND:(((P)>7&&(P)<14)?&PINB:&PINC))
-#define pinIndex(P)((uint8_t)(P>13?P-14:P&7))
-#define pinMask(P)((uint8_t)(1<<pinIndex(P)))
+const char string_0[] PROGMEM = "fifolimit";
+const char string_1[] PROGMEM = "mcmbl";
+const char string_2[] PROGMEM = "mscnt";
+const char string_3[] PROGMEM = "muoverflmax";
+const char string_4[] PROGMEM = "maxnumpat";
+const char string_5[] PROGMEM = "muthresh";
+const char string_6[] PROGMEM = "maxpulse";
 
-#define pinAsInput(P) *(ddrOfPin(P))&=~pinMask(P)
-#define pinAsInputPullUp(P) *(ddrOfPin(P))&=~pinMask(P);digitalHigh(P)
-#define pinAsOutput(P) *(ddrOfPin(P))|=pinMask(P)
-#define digitalLow(P) *(portOfPin(P))&=~pinMask(P)
-#define digitalHigh(P) *(portOfPin(P))|=pinMask(P)
-#define isHigh(P)((*(pinOfPin(P))& pinMask(P))>0)
-#define isLow(P)((*(pinOfPin(P))& pinMask(P))==0)
-#define digitalState(P)((uint8_t)isHigh(P))
-
-
-
-
+const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6};
 
 #ifdef CMP_MEMDBG
 
@@ -136,14 +179,12 @@ int16_t stackSize=0; // partition size for current snapshot of the stack section
 int16_t freeMem1=0;  // available ram calculation #1
 int16_t freeMem2=0;  // available ram calculation #2
 
-#endif
+#endif  // CMP_MEMDBG
 
 
-// EEProm Addresscommands
-#define addr_init 0
-#define addr_features 1
-
-
+// EEProm Address
+#define EE_MAGIC_OFFSET      0
+#define addr_features        0xff
 
 void handleInterrupt();
 void enableReceive();
@@ -157,118 +198,191 @@ void HandleCommand();
 bool command_available=false;
 unsigned long getUptime();
 void getConfig();
-void enDisPrint(bool enDis);
 void getPing();
 void configCMD();
-void storeFunctions(const int8_t ms=1, int8_t mu=1, int8_t mc=1);
-void getFunctions(bool *ms,bool *mu,bool *mc);
-
-
+void storeFunctions(const int8_t ms=1, int8_t mu=1, int8_t mc=1, int8_t red=1, int8_t deb=0, int8_t led=1, int8_t overfl=0);
+void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl);
+void initEEPROM(void);
+void changeReceiver();
+uint8_t cmdstringPos2int(uint8_t pos);
+void printHex2(const byte hex);
+uint8_t rssiCallback() { return 0; };	// Dummy return if no rssi value can be retrieved from receiver
 
 
 void setup() {
+	uint8_t ccVersion;
 	Serial.begin(BAUDRATE);
-	#ifdef DEBUG
-	#ifdef CMP_FIFO
-	MSG_PRINTLN("Using sFIFO");
-	#else
+	while (!Serial) {
+		; // wait for serial port to connect. Needed for native USB
+	}
+	//if (musterDec.MdebEnabled) {
+	DBG_PRINTLN(F("Using sFIFO"));
+	//}
+#ifdef WATCHDOG
+	if (MCUSR & (1 << WDRF)) {
+		MSG_PRINTLN(F("Watchdog caused a reset"));
+	}
+	/*
+	if (MCUSR & (1 << BORF)) {
+		DBG_PRINTLN("brownout caused a reset");
+	}
+	if (MCUSR & (1 << EXTRF)) {
+		DBG_PRINTLN("external reset occured");
+	}
+	if (MCUSR & (1 << PORF)) {
+		DBG_PRINTLN("power on reset occured");
+	}
+	*/
+	wdt_reset();
 
-	MSG_PRINTLN(F("Startup:"));
-	MSG_PRINT(F("# Bytes / Puffer: "));
-	MSG_PRINTLN(sizeof(int)*FiFo.getBuffSize());
-	MSG_PRINT(F("# Len Fifo: "));
-	MSG_PRINTLN(FiFo.getBuffSize());
-
-	#endif // CMP_FIFO
-	#endif
+	wdt_enable(WDTO_2S);  	// Enable Watchdog
+#endif
 	//delay(2000);
-	pinMode(PIN_RECEIVE,INPUT);
-	pinMode(PIN_SEND,OUTPUT);
-	pinMode(PIN_LED,OUTPUT);
+	pinAsInput(PIN_RECEIVE);
+	pinAsOutput(PIN_LED);
+	// CC1101
+#ifdef WATCHDOG
+	wdt_reset();
+#endif
+#ifdef CMP_CC1101
+	cc1101::setup();
+#endif
+  	initEEPROM();
+        //musterDec.MsMoveCount = 0;
+	
+#ifdef CMP_CC1101
+	MSG_PRINT(F("CCInit "));	
+	cc1101::CCinit();				// CC1101 init
+	ccVersion = cc1101::getCCVersion();
+	if (ccVersion == 0x00 || ccVersion == 0xFF)	// checks if valid Chip ID is found. Usualy 0x03 or 0x14.
+	{
+		MSG_PRINT(F("no CC11xx found!"));
+		hasCC1101 = false;
+	}
+	else {
+		MSG_PRINT(F("ok."));
+		hasCC1101 = true;
+	}
+	MSG_PRINT(F(" ccVer="));
+	MSG_PRINT(ccVersion);
+	MSG_PRINT(F(" ccPartnum="));
+	MSG_PRINTLN(cc1101::getCCPartnum());
+	
+	if (hasCC1101)
+	{
+		musterDec.setRSSICallback(&cc1101::getRSSI);                    // Provide the RSSI Callback
+	} 
+	else
+		musterDec.setRSSICallback(&rssiCallback);	// Provide the RSSI Callback		
+#endif 
+
+	pinAsOutput(PIN_SEND);
+	if (musterDec.MdebEnabled) {
+		MSG_PRINTLN(F("Starting timerjob"));
+	}
+	delay(50);
+
 	Timer1.initialize(31*1000); //Interrupt wird jede n Millisekunden ausgeloest
 	Timer1.attachInterrupt(cronjob);
-	if (EEPROM.read(addr_init) == 0xB)
-	{
-		#ifdef DEBUG
-		MSG_PRINTLN("Reading values fom eeprom");
-		#endif
-		getFunctions(&musterDec.MSenabled,&musterDec.MUenabled,&musterDec.MCenabled);
-	} else {
-		EEPROM.write(addr_init,0xB);
-		storeFunctions(1, 1, 1);    // Init EEPROM with all flags enabled
-		#ifdef DEBUG
-		MSG_PRINTLN("Init eeprom to defaults after flash");
-		#endif
+
+	cmdstring.reserve(maxCmdString);
+
+        if (!hasCC1101 || cc1101::regCheck()) {
+#ifndef SENDTODECODER
+		enableReceive();
+		if (musterDec.MdebEnabled) {
+			MSG_PRINTLN(F("receiver enabled"));
+		}
+#endif
 	}
-
-	/*MSG_PRINT("MS:"); 	MSG_PRINTLN(musterDec.MSenabled);
-	MSG_PRINT("MU:"); 	MSG_PRINTLN(musterDec.MUenabled);
-	MSG_PRINT("MC:"); 	MSG_PRINTLN(musterDec.MCenabled);*/
-
-
-	enableReceive();
-	cmdstring.reserve(40);
+	else {
+		MSG_PRINTLN(F("cc1101 is not correctly set. Please do a factory reset via command e"));
+	}
 }
 
 void cronjob() {
-
-	/*
+	static uint16_t cnt0 = 0;
+	static uint8_t cnt1 = 0;
 	 const unsigned long  duration = micros() - lastTime;
-	 if (duration > maxPulse) { //Auf Maximalwert pr�fen.
-		 //handleInterrupt();
-		 //MSG_PRINTLN("PTout");
+	 
+	 if (duration > maxPulse) { //Auf Maximalwert pruefen.
 		 int sDuration = maxPulse;
 		 if (isLow(PIN_RECEIVE)) { // Wenn jetzt low ist, ist auch weiterhin low
 			 sDuration = -sDuration;
 		 }
-		#ifdef CMP_FIFO
 		 FiFo.enqueue(sDuration);
-		#else
-		 FiFo.addValue(&sDuration);
-		#endif // CMP_FIFO
-		lastTime = micros();
 
-	 }*/
+		 lastTime = micros();
+	
+
+	 }
+	if (cnt0++ == 0) {
+		if (cnt1++ == 0) {
+			getUptime();
+		}
+	}
 	 digitalWrite(PIN_LED, blinkLED);
 	 blinkLED = false;
-	/*
-	 if (FiFo.count() >19)
-	 {
-		 MSG_PRINT("SF:"); MSG_PRINTLN(FiFo.count());
-	 }
-	 */
+
 }
+
 
 void loop() {
 	static int aktVal=0;
 	bool state;
+	uint8_t fifoCount;
+	
+#ifdef __AVR_ATmega32U4__	
+	serialEvent();
+#endif
 	if (command_available) {
 		command_available=false;
 		HandleCommand();
 		if (!command_available) { cmdstring = ""; }
-		blinkLED=true;
+		if (LEDenabled) {
+		  blinkLED=true;
+		}
 	}
-	#ifdef CMP_FIFO
-
-
+#ifdef WATCHDOG
+	wdt_reset();
+#endif
+	musterDec.printMsgSuccess = false;
+	musterDec.NoMsgEnd = false;
 	while (FiFo.count()>0 ) { //Puffer auslesen und an Dekoder uebergeben
 
 		aktVal=FiFo.dequeue();
-		state = musterDec.decode(&aktVal); 
-		if (state) blinkLED=true; //LED blinken, wenn Meldung dekodiert
+		state = musterDec.decode(&aktVal);
+		if (musterDec.MdebEnabled && musterDec.printMsgSuccess) {
+			fifoCount = FiFo.count();
+			if (fifoCount > MdebFifoLimit) {
+				if (musterDec.NoMsgEnd) {
+					if (musterDec.MredEnabled) {
+						MSG_PRINT(F("F"));
+						MSG_PRINT(fifoCount, HEX);
+						MSG_PRINT(F(";"));
+					}
+				}
+				else {
+					MSG_PRINT(F("MF="));
+					MSG_PRINT(fifoCount, DEC);
+					MSG_PRINTLN("");
+				}
+			}
+		}
+		if (musterDec.printMsgSuccess && LEDenabled) {
+			blinkLED=true; //LED blinken, wenn Meldung dekodiert
+		}
+		musterDec.printMsgSuccess = false;
 	}
-	#else
-	while (FiFo.getNewValue(&aktVal)) { //Puffer auslesen und an Dekoder uebergeben
-		state = musterDec.decode(&aktVal); //Logilink, PT2262
-		if (state) blinkLED=true; //LED blinken, wenn Meldung dekodiert
-	}
-	#endif
+
  }
+
 
 
 
 //========================= Pulseauswertung ================================================
 void handleInterrupt() {
+  cli();
   const unsigned long Time=micros();
   //const bool state = digitalRead(PIN_RECEIVE);
   const unsigned long  duration = Time - lastTime;
@@ -283,68 +397,42 @@ void handleInterrupt() {
     if (isHigh(PIN_RECEIVE)) { // Wenn jetzt high ist, dann muss vorher low gewesen sein, und dafuer gilt die gemessene Dauer.
       sDuration=-sDuration;
     }
-    #ifdef CMP_FIFO
 	//MSG_PRINTLN(sDuration);
     FiFo.enqueue(sDuration);
-	#else
-	FiFo.addValue(&sDuration);
 
-	#endif // CMP_FIFO
 
     //++fifocnt;
   } // else => trash
-
+  sei();
 }
 
 void enableReceive() {
-   attachInterrupt(digitalPinToInterrupt(PIN_RECEIVE),handleInterrupt,CHANGE);
+	attachInterrupt(digitalPinToInterrupt(PIN_RECEIVE), handleInterrupt, CHANGE);
+   #ifdef CMP_CC1101
+   if (hasCC1101) cc1101::setReceiveMode();
+   #endif
 }
 
 void disableReceive() {
-  detachInterrupt(0);
+  detachInterrupt(digitalPinToInterrupt(PIN_RECEIVE));
+
+  #ifdef CMP_CC1101
+  if (hasCC1101) cc1101::setIdleMode();
+  #endif
+  FiFo.flush();
+
 }
 
-
-
-//============================== IT_Send =========================================
-uint8_t ITrepetition = 6;
-int ITbaseduration = 300;
-
-void PT2262_transmit(uint8_t nHighPulses, uint8_t nLowPulses) {
-  //digitalWrite(PIN_SEND, HIGH);
-  digitalHigh(PIN_SEND);
-  delayMicroseconds(ITbaseduration * nHighPulses);
-  //digitalWrite(PIN_SEND, LOW);
-  digitalLow(PIN_SEND);
-  delayMicroseconds(ITbaseduration * nLowPulses);
-}
-
-void sendPT2262(char* triStateMessage) {
-  disableReceive();
-  for (int i = 0; i < ITrepetition; i++) {
-    unsigned int pos = 0;
-    PT2262_transmit(1,31);
-    while (triStateMessage[pos] != '\0') {
-      switch(triStateMessage[pos]) {
-      case '0':
-        PT2262_transmit(1,3);
-        PT2262_transmit(1,3);
-        break;
-      case 'F':
-        PT2262_transmit(1,3);
-        PT2262_transmit(3,1);
-        break;
-      case '1':
-        PT2262_transmit(3,1);
-        PT2262_transmit(3,1);
-        break;
-      }
-      pos++;
-    }
+/*void send_rawx(const uint8_t startpos,const uint16_t endpos,const int16_t *buckets, String *source=&cmdstring)
+{
+  int16_t sendarr[] ={200,-200,300,-300,500,-400,600,-600,800,-800,500,-500,200,-200,300,-300,500,-400,600,-600,800,-800,500,-500,200,-200,500,-300,400,-400,500,-600,800,-800,500,-500,200,-200,300,-300,400,-400,600,-600,1100,-1100,800,-800,500,-500};
+  int16_t p;
+  for (uint8_t i=0;i<50;i++ ) {
+    p = sendarr[i];
+    //MSG_PRINTLN(p);
+    musterDec.decode(&p);
   }
-  enableReceive();
-}
-
+}*/
 
 //================================= RAW Send ======================================
 void send_raw(const uint8_t startpos,const uint16_t endpos,const int16_t *buckets, String *source=&cmdstring)
@@ -352,7 +440,8 @@ void send_raw(const uint8_t startpos,const uint16_t endpos,const int16_t *bucket
 	uint8_t index=0;
 	unsigned long stoptime=micros();
 	bool isLow;
-	uint16_t dur;
+	int16_t dur;
+
 	for (uint16_t i=startpos;i<=endpos;i++ )
 	{
 		//MSG_PRINT(cmdstring.substring(i,i+1));
@@ -360,16 +449,22 @@ void send_raw(const uint8_t startpos,const uint16_t endpos,const int16_t *bucket
 		//MSG_PRINT(index);
 		isLow=buckets[index] >> 15;
 		dur = abs(buckets[index]); 		//isLow ? dur = abs(buckets[index]) : dur = abs(buckets[index]);
-
+#ifndef SENDTODECODER
 		while (stoptime > micros()){
 			;
 		}
 		isLow ? digitalLow(PIN_SEND): digitalHigh(PIN_SEND);
 		stoptime+=dur;
+#else
+		if (isLow) dur = -dur;
+		musterDec.decode(&dur);
+#endif
 	}
+#ifndef SENDTODECODER
 	while (stoptime > micros()){
 		;
 	}
+#endif
 	//MSG_PRINTLN("");
 
 }
@@ -400,7 +495,7 @@ void send_mc(const uint8_t startpos,const uint8_t endpos, const int16_t clock)
 				
 					stoptime += clock;
 					while (stoptime > micros())
-						yield();
+						;
 			}
 			
 		}
@@ -410,30 +505,49 @@ void send_mc(const uint8_t startpos,const uint8_t endpos, const int16_t clock)
 }
 
 
-
-bool split_cmdpart(int16_t *startpos, String *msg_part)
+bool split_cmdpart(int16_t *startpos, int16_t *startdata)
 {
 	int16_t endpos=0;
-	//startpos=cmdstring.indexOf(";",startpos);   			 // search first  ";"
+	*startdata = -1;
 	endpos=cmdstring.indexOf(";",*startpos);     			 // search next   ";"
 
-	if (endpos ==-1 || *startpos== -1) return false;
-	*msg_part = cmdstring.substring(*startpos,endpos);
+	if (endpos ==-1 || *startpos== -1) {
+		*startdata = 0;
+		return false;
+	}
+	msg_cmd0 = cmdstring.charAt(*startpos);
+	msg_cmd1 = cmdstring.charAt(*startpos+1);
+	/*MSG_PRINT("split_spos=");
+	MSG_PRINT(*startpos);
+	MSG_PRINT(" cmd=");
+	MSG_PRINT(msg_cmd0);
+	MSG_PRINTLN(msg_cmd1);*/
+
+	if (msg_cmd0 == 'S') {
+		*startdata = 0;
+	} else if (msg_cmd0 == 'P') {
+		if (cmdstring.charAt(*startpos+2) != '=') return false;
+		*startdata = *startpos+3;
+	} else {
+		if (msg_cmd1 != '=') return false;
+		*startdata = *startpos+2;
+	}
 	*startpos=endpos+1;    // Set startpos to endpos to extract next part
 	return true;
 }
+
 // SC;R=4;SM;C=400;D=AFFFFFFFFE;SR;P0=-2500;P1=400;D=010;SM;D=AB6180;SR;D=101;
 // SC;R=4;SM;C=400;D=FFFFFFFF;SR;P0=-400;P1=400;D=101;SM;D=AB6180;SR;D=101;
 // SR;R=3;P0=1230;P1=-3120;P2=-400;P3=-900;D=030301010101010202020202020101010102020202010101010202010120202;
-// SM;C=400;D=AAAAFFFF;
+// SM;C=400;D=AAAAFFFF;F=123456;
 // SR;R=10;P0=-2000;P1=-1000;P2=500;P3=-6000;D=2020202021212020202121212021202021202121212023;
 
 struct s_sendcmd {
 	int16_t sendclock;
-	uint8_t type;
 	uint8_t datastart;
 	uint16_t dataend;
-	int16_t buckets[6];
+	int16_t buckets[maxSendPattern];
+	uint8_t repeats;
 } ;
 
 void send_cmd()
@@ -441,99 +555,172 @@ void send_cmd()
 	#define combined 0
 	#define manchester 1
 	#define raw 2
+	#define maxSendCmd 5
 
-	String msg_part;
-	msg_part.reserve(30);
 	uint8_t repeats=1;  // Default is always one iteration so repeat is 1 if not set
-	//uint8_t type;
 	int16_t start_pos=0;
-	//int16_t buckets[6]={};
+	int16_t startdata=0;
 	uint8_t counter=0;
-	//uint16_t sendclock;
-	bool extraDelay = true;
+	bool isCombined = false;
+	bool extraDelay = false;
 
-	s_sendcmd command[5];
+	s_sendcmd command[maxSendCmd];
+	command[0].datastart = 0;
+
+	uint8_t ccParamAnz = 0;   // Anzahl der per F= uebergebenen cc1101 Register
+	uint8_t val;
 
 	disableReceive();
 
 	uint8_t cmdNo=255;
 
 
-	while (split_cmdpart(&start_pos,&msg_part))
+	while (split_cmdpart(&start_pos,&startdata))
 	{
-		//MSG_PRINTLN(msg_part);
-		if (msg_part.charAt(0) == 'S')
+		if (msg_cmd0 == 'S')
 		{
-			if (msg_part.charAt(1) == 'C')  // send combined informatio flag
-			{
-				//type=combined;
-				//cmdNo=255;
-				extraDelay = false;
+			if (cmdNo == maxSendCmd) {
+				startdata = -1;
+				break;
 			}
-			else if (msg_part.charAt(1) == 'M') // send manchester
+			if (msg_cmd1 == 'C')  // send combined informatio flag
 			{
-				//type=manchester;
+#ifdef DEBUGSENDCMD
+				MSG_PRINTLN("SC");
+#endif
+				isCombined = true;
+			}
+			else if (msg_cmd1 == 'M' || msg_cmd1 == 'R') // send manchester or raw
+			{
 				cmdNo++;
-				command[cmdNo].type=manchester;
-				//MSG_PRINTLN("Adding manchester");
+				isCombined = false;
+				command[cmdNo].sendclock = 0;
+				command[cmdNo].repeats = 1;
+#ifdef DEBUGSENDCMD
+				MSG_PRINT("S");
+				MSG_PRINTLN(msg_cmd1);
+#endif
 			}
-			else if (msg_part.charAt(1) == 'R') // send raw
-			{
-				//type=raw;
-				cmdNo++;
-				command[cmdNo].type=raw;
-				//MSG_PRINTLN("Adding raw");
-				extraDelay = false;
-
+		} else if (msg_cmd0 == 'R') {
+			if (isCombined) {
+				repeats = cmdstring.substring(startdata, start_pos-1).toInt();
+#ifdef DEBUGSENDCMD
+				MSG_PRINT("R=");
+				MSG_PRINTLN(repeats);
+#endif
+			} else {
+				if (cmdNo == 255) continue;
+				command[cmdNo].repeats = cmdstring.substring(startdata, start_pos-1).toInt();
+#ifdef DEBUGSENDCMD
+				MSG_PRINT("R=");
+				MSG_PRINTLN(command[cmdNo].repeats);
+#endif
 			}
-		}
-		else if (msg_part.charAt(0) == 'P' && msg_part.charAt(2) == '=') // Do some basic detection if data matches what we expect
-		{
-			counter = msg_part.substring(1,2).toInt(); // extract the pattern number
-			//buckets[counter]=  msg_part.substring(3).toInt();
-			command[cmdNo].buckets[counter]=msg_part.substring(3).toInt();
-		    //MSG_PRINTLN("Adding bucket");
-
-		} else if(msg_part.charAt(0) == 'R' && msg_part.charAt(1) == '=') {
-			repeats= msg_part.substring(2).toInt();
-		    //MSG_PRINTLN("Adding repeats");
-
-		} else if (msg_part.charAt(0) == 'D') {
-			command[cmdNo].datastart = start_pos - msg_part.length()+1;
+		} else if (cmdNo == 255) {	// es wurde noch kein SR oder SM erkannt
+			continue;
+		} else if (msg_cmd0 == 'P') { // Do some basic detection if data matches what we expect
+			counter = cmdstring.substring(startdata-2, startdata-1).toInt(); // extract the pattern number
+			if (counter > maxSendPattern) {
+				startdata = -1;
+				break;
+			}
+			command[cmdNo].buckets[counter]=cmdstring.substring(startdata, start_pos-1).toInt();
+#ifdef DEBUGSENDCMD
+		        MSG_PRINT("P");
+			MSG_PRINT(counter);
+			MSG_PRINT("=");
+			MSG_PRINTLN(command[cmdNo].buckets[counter]);
+#endif
+		} else if (msg_cmd0 == 'D') {
+			command[cmdNo].datastart = startdata;
 			command[cmdNo].dataend = start_pos-2;
-		    //MSG_PRINT("locating data start:");
-		   // MSG_PRINT(command[cmdNo].datastart);
-		    //MSG_PRINT(" end:");
-			//MSG_PRINTLN(command[cmdNo].dataend);
-			//if (type==raw) send_raw(&msg_part,buckets);
-			//if (type==manchester) send_mc(&msg_part,sendclock);
-			//digitalWrite(PIN_SEND, LOW); // turn off transmitter
-			//digitalLow(PIN_SEND);
-		} else if(msg_part.charAt(0) == 'C' && msg_part.charAt(1) == '=')
-		{
-			//sendclock = msg_part.substring(2).toInt();
-			command[cmdNo].sendclock = msg_part.substring(2).toInt();
-		    //MSG_PRINTLN("adding sendclock");
+#ifdef DEBUGSENDCMD
+			MSG_PRINT("D=");
+			MSG_PRINTLN(cmdstring.substring(startdata, start_pos-1));
+#endif
+		} else if (msg_cmd0 == 'C') {
+			command[cmdNo].sendclock = cmdstring.substring(startdata, start_pos-1).toInt();
+			extraDelay = true;
+#ifdef DEBUGSENDCMD
+			MSG_PRINT("C=");
+			MSG_PRINTLN(command[cmdNo].sendclock);
+#endif
+		} else if (msg_cmd0 == 'F') {
+			ccParamAnz = (start_pos - startdata) / 2;
+#ifdef DEBUGSENDCMD
+			MSG_PRINT("F=");
+#endif
+#ifndef SENDTODECODER
+			if (ccParamAnz > 0 && ccParamAnz <= 5 && hasCC1101) {
+				uint8_t hex;
+				//MSG_PRINTLN("write new ccreg  ");
+				for (uint8_t i=0;i<ccParamAnz;i++)
+				{
+					hex = (uint8_t)cmdstring.charAt(startdata + i*2);
+					val = cc1101::hex2int(hex) * 16;
+					hex = (uint8_t)cmdstring.charAt(startdata+1 + i*2);
+					val = cc1101::hex2int(hex) + val;
+					cc1101::writeReg(0x0d + i, val);            // neue Registerwerte schreiben
+  #ifdef DEBUGSENDCMD
+					printHex2(val);
+  #endif
+				}
+			}
+#endif
+#ifdef DEBUGSENDCMD
+			MSG_PRINTLN("");
+#endif
 		}
 	}
 
-	for (uint8_t i=0;i<repeats;i++)
+	if (startdata == -1 || command[0].datastart == 0)
 	{
-		for (uint8_t c=0;c<=cmdNo;c++)
+		MSG_PRINT(F("send failed"));
+	} else
+	{
+#ifndef SENDTODECODER
+		#ifdef CMP_CC1101
+		if (hasCC1101) cc1101::setTransmitMode();	
+		#endif
+#endif
+		for (uint8_t i=0;i<repeats;i++)
 		{
-			if (command[c].type==raw) send_raw(command[c].datastart,command[c].dataend,command[c].buckets);
-			if (command[c].type==manchester) send_mc(command[c].datastart,command[c].dataend,command[c].sendclock);
-			digitalLow(PIN_SEND);
+			for (uint8_t c=0;c<=cmdNo;c++)
+			{
+				if (command[c].sendclock == 0) {   // raw
+					for (uint8_t rep = 0; rep < command[c].repeats; rep++) {
+						send_raw(command[c].datastart, command[c].dataend, command[c].buckets);
+					}
+				} else {
+					for (uint8_t rep = 0; rep < command[c].repeats; rep++) {
+						if (rep > 0) delay(1);
+						send_mc(command[c].datastart, command[c].dataend, command[c].sendclock);
+					}
+				}
+				digitalLow(PIN_SEND);
+			}
+			//if (extraDelay) delay(1);
 		}
-		if (extraDelay) delay(1);
+
+#ifndef SENDTODECODER
+		MSG_PRINT(cmdstring); // echo
+		if (ccParamAnz > 0) {
+			MSG_PRINT(F("ccreg write back "));
+			for (uint8_t i=0;i<ccParamAnz;i++)
+			{
+				val = EEPROM.read(0x0f + i);
+				printHex2(val);
+				cc1101::writeReg(0x0d + i, val);    // gemerkte Registerwerte zurueckschreiben
+			}
+			//MSG_PRINTLN("");
+		}
+#endif
 	}
-
+#ifndef SENDTODECODER
 	enableReceive();	// enable the receiver
-    MSG_PRINTLN(cmdstring); // echo
-
+	MSG_PRINTLN("");
+#endif
 }
-
-
 
 
 
@@ -542,56 +729,68 @@ void IT_CMDs();
 
 void HandleCommand()
 {
-
+  uint8_t reg;
+  uint8_t val;
+  char buffer[12];
+  
   #define  cmd_Version 'V'
   #define  cmd_freeRam 'R'
-  #define  cmd_intertechno 'i'
   #define  cmd_uptime 't'
   #define  cmd_changeReceiver 'X'
   #define  cmd_space ' '
   #define  cmd_help '?'
-  #define  cmd_changeFilter 'F'
+//#define  cmd_changeFilter 'F'
   #define  cmd_send 'S'
   #define  cmd_ping 'P'
-  #define  cmd_config 'C'
-  #define  cmd_getConfig 'G' //decrepated
+  #define  cmd_config 'C'     // CG get config, set config, C<reg> get CC1101 register
+  #define  cmd_write 'W'      // write EEPROM und write CC1101 register
+  #define  cmd_read  'r'      // read EEPROM
+  #define  cmd_patable 'x' 
+  #define  cmd_ccFactoryReset 'e'  // EEPROM / factory reset
 
-
+  bool unsuppCmd = false;
+  
   if (cmdstring.charAt(0) == cmd_ping){
 	getPing();
   }  // ?: Kommandos anzeigen
   else if (cmdstring.charAt(0) == cmd_help) {
-	MSG_PRINT(cmd_help);	MSG_PRINT(F(" Use one of "));
-	MSG_PRINT(cmd_Version);MSG_PRINT(cmd_space);
-	MSG_PRINT(cmd_intertechno);MSG_PRINT(cmd_space);
-	MSG_PRINT(cmd_freeRam);MSG_PRINT(cmd_space);
-	MSG_PRINT(cmd_uptime);MSG_PRINT(cmd_space);
-	MSG_PRINT(cmd_changeReceiver);MSG_PRINT(cmd_space);
-	MSG_PRINT(cmd_changeFilter);MSG_PRINT(cmd_space);
-	MSG_PRINT(cmd_send);MSG_PRINT(cmd_space);
-	MSG_PRINT(cmd_ping);MSG_PRINT(cmd_space);
-	MSG_PRINT(cmd_config);MSG_PRINT(cmd_space);
-	MSG_PRINT(cmd_getConfig);MSG_PRINT(cmd_space);  //decrepated
-
+    if (cmdstring.charAt(1) == 'S') {
+	for (uint8_t i = 0; i < CSetAnz; i++) {
+	    strcpy_P(buffer, (char*)pgm_read_word(&(CSetCmd[i])));
+	    MSG_PRINT(F("CS"));
+	    MSG_PRINT(buffer);
+	    //MSG_PRINT(CSetCmd[i]);
+	    MSG_PRINT(F("= "));
+        }
 	MSG_PRINTLN("");
+    } else {
+	MSG_PRINT(F("? Use one of V R t X S P C r W"));
+	if (hasCC1101) {
+		MSG_PRINT(F(" x e"));
+	}
+	MSG_PRINTLN("");
+    }
   }
   // V: Version
   else if (cmdstring.charAt(0) == cmd_Version) {
-    MSG_PRINTLN("V " PROGVERS " SIGNALduino - compiled at " __DATE__ " " __TIME__);
+	  MSG_PRINT(F("V " PROGVERS " SIGNALduino "));
+	  if (hasCC1101) {
+		MSG_PRINT(F("cc1101 "));
+#ifdef PIN_MARK433
+	    MSG_PRINT(F("(minicul "));
+	    MSG_PRINT(isLow(PIN_MARK433) ? "433" : "868");
+	    MSG_PRINT(F("Mhz) "));
+#endif
+      }
+#ifdef SENDTODECODER
+	MSG_PRINT(F("(no receive, only send to decoder) "));
+#endif
+	MSG_PRINTLN(F("- compiled at " __DATE__ " " __TIME__));
+
   }
   // R: FreeMemory
   else if (cmdstring.charAt(0) == cmd_freeRam) {
-
     MSG_PRINTLN(freeRam());
-  }
-  // i: Intertechno
-  else if (cmdstring.charAt(0) == cmd_intertechno) {
-	if (musterDec.getState() != searching)
-	{
-		command_available=true;
-	} else {
-		IT_CMDs();
-	}
   }
   else if (cmdstring.charAt(0) == cmd_send) {
   	if (musterDec.getState() != searching )
@@ -607,66 +806,178 @@ void HandleCommand()
   }
   // XQ disable receiver
   else if (cmdstring.charAt(0) == cmd_changeReceiver) {
-    changeReciver();
+    changeReceiver();
   }
-  else if (cmdstring.charAt(0) == cmd_changeFilter) {
-  }
+  //else if (cmdstring.charAt(0) == cmd_changeFilter) {
+  //}
   else if (cmdstring.charAt(0) == cmd_config) {
-    configCMD();
+	  if (cmdstring.charAt(1) == 'G') {
+		  getConfig();
+	  }
+	  else if (cmdstring.charAt(1) == 'E' || cmdstring.charAt(1) == 'D') {  //Todo:  E und D sind auch hexadezimal, werden hier aber abgefangen
+		  configCMD();
+	  }
+	  else if (cmdstring.charAt(1) == 'S') {
+		  if (configSET() == false) {
+			unsuppCmd = true;
+		  }
+	  }
+      else if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2)) && hasCC1101) {
+		reg = cmdstringPos2int(1);
+		cc1101::readCCreg(reg);
+      }
+    else {
+      unsuppCmd = true; 
+    }
   }
-  // get config
-  else if (cmdstring.charAt(0) == cmd_getConfig) {
-     getConfig();
+  else if (cmdstring.charAt(0) == cmd_write) {            // write EEPROM und CC11001 register
+    if (cmdstring.charAt(1) == 'S' && cmdstring.charAt(2) == '3' && hasCC1101)  {       // WS<reg>  Command Strobes
+        cc1101::commandStrobes();
+    } else if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2)) && isHexadecimalDigit(cmdstring.charAt(3)) && isHexadecimalDigit(cmdstring.charAt(4))) {
+         reg = cmdstringPos2int(1);
+         val = cmdstringPos2int(3);
+         EEPROM.write(reg, val);
+         if (hasCC1101) {
+           cc1101::writeCCreg(reg, val);
+         }
+    } else {
+         unsuppCmd = true;
+    }
+  }
+  // R<adr>  read EEPROM
+  else if (cmdstring.charAt(0) == cmd_read && isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2))) {             // R<adr>  read EEPROM
+     reg = cmdstringPos2int(1);
+     MSG_PRINT(F("EEPROM "));
+     printHex2(reg);
+     if (cmdstring.charAt(3) == 'n') {
+         MSG_PRINT(F(" :"));
+         for (uint8_t i = 0; i < 16; i++) {
+             MSG_PRINT(F(" "));
+             printHex2(EEPROM.read(reg + i));
+         }
+     } else {
+        MSG_PRINT(F(" = "));
+        printHex2(EEPROM.read(reg));
+     }
+     MSG_PRINTLN("");
+  }
+  else if (cmdstring.charAt(0) == cmd_patable && isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2)) && hasCC1101) {
+     val = cmdstringPos2int(1);
+     cc1101::writeCCpatable(val);
+     MSG_PRINT(F("Write "));
+     printHex2(val);
+     MSG_PRINTLN(F(" to PATABLE done"));
+  }
+  else if (cmdstring.charAt(0) == cmd_ccFactoryReset) {
+     if (cmdstring.charAt(1) == 'C') {
+         initEEPROMconfig();
+	 callGetFunctions();
+     } else if (hasCC1101) {
+         cc1101::ccFactoryReset();
+         cc1101::CCinit();
+     } else {
+         unsuppCmd = true;
+     }
   }
   else {
-	  MSG_PRINTLN(F("Unsupported command"));
+      unsuppCmd = true;
+  }
+  if (unsuppCmd) {
+      MSG_PRINTLN(F("Unsupported command"));
   }
 }
 
 
-void getConfig()
+uint8_t cmdstringPos2int(uint8_t pos) {
+  uint8_t val;
+  uint8_t hex;
+  
+       hex = (uint8_t)cmdstring.charAt(pos);
+       val = cc1101::hex2int(hex) * 16;
+       hex = (uint8_t)cmdstring.charAt(pos+1);
+       val = cc1101::hex2int(hex) + val;
+       return val;
+}
+
+
+inline void getConfig()
 {
    MSG_PRINT(F("MS="));
-   //enDisPrint(musterDec.MSenabled);
    MSG_PRINT(musterDec.MSenabled,DEC);
    MSG_PRINT(F(";MU="));
-   //enDisPrint(musterDec.MUenabled);
    MSG_PRINT(musterDec.MUenabled, DEC);
    MSG_PRINT(F(";MC="));
-   //enDisPrint(musterDec.MCenabled);
-   MSG_PRINTLN(musterDec.MCenabled, DEC);
-}
-
-
-void enDisPrint(bool enDis)
-{
-   if (enDis) {
-      MSG_PRINT(F("enable"));
+   MSG_PRINT(musterDec.MCenabled, DEC);
+   MSG_PRINT(F(";Mred="));
+   MSG_PRINT(musterDec.MredEnabled, DEC);
+   if (LEDenabled == false) {
+      MSG_PRINT(F(";LED=0"));
+   }
+   if (musterDec.MuNoOverflow == true) {
+      MSG_PRINT(F(";MuNoOverflow=1"));
+   }
+   MSG_PRINT(F(";Mdebug="));
+   MSG_PRINT(musterDec.MdebEnabled, DEC);
+   MSG_PRINT(F("_MScnt="));
+   MSG_PRINT(musterDec.MsMoveCountmax, DEC);
+   if (musterDec.MuNoOverflow == true) {
+      MSG_PRINT(F(";MuOverflMax="));
+      MSG_PRINT(musterDec.MuOverflMax, DEC);
    }
    else {
-      MSG_PRINT(F("disable"));
+      MSG_PRINT(F(";MuSplitThresh="));
+      MSG_PRINT(musterDec.MuSplitThresh, DEC);
    }
+   if (musterDec.mcMinBitLen != mcMinBitLenDef) {
+      MSG_PRINT(F(";mcMinBitLen="));
+      MSG_PRINT(musterDec.mcMinBitLen, DEC);
+   }
+   if (musterDec.cMaxNumPattern != CSetDef[4]) {
+      MSG_PRINT(F(";maxNumPat="));
+      MSG_PRINT(musterDec.cMaxNumPattern, DEC);
+   }
+   if (musterDec.cMaxPulse != -maxPulse) {
+      MSG_PRINT(F(";maxPulse="));
+      MSG_PRINT(musterDec.cMaxPulse, DEC);
+   }
+   if (musterDec.MdebEnabled) {
+      MSG_PRINT(F(";MdebFifoLimit="));
+      MSG_PRINT(MdebFifoLimit, DEC);
+      MSG_PRINT(F("/"));
+      MSG_PRINT(FIFO_LENGTH, DEC);
+   }
+   MSG_PRINTLN("");
 }
 
 
-void configCMD()
+inline void configCMD()
 {
-  if (cmdstring.charAt(1) == 'G') {  // Get, no change to configuration
-	getConfig();
-	return;
-  }
-
   bool *bptr;
 
   if (cmdstring.charAt(2) == 'S') {  	  //MS
-	bptr=&musterDec.MSenabled;;
+	bptr=&musterDec.MSenabled;
   }
   else if (cmdstring.charAt(2) == 'U') {  //MU
-	bptr=&musterDec.MUenabled;;
+	bptr=&musterDec.MUenabled;
   }
   else if (cmdstring.charAt(2) == 'C') {  //MC
-	bptr=&musterDec.MCenabled;;
+	bptr=&musterDec.MCenabled;
   }
+  else if (cmdstring.charAt(2) == 'R') {  //Mreduce
+	bptr=&musterDec.MredEnabled;
+  }
+  else if (cmdstring.charAt(2) == 'D') {  //Mdebug
+	bptr=&musterDec.MdebEnabled;
+  }
+  else if (cmdstring.charAt(2) == 'L') {  //LED
+	bptr=&LEDenabled;
+  }
+  else if (cmdstring.charAt(2) == 'O') {  //
+	bptr=&musterDec.MuNoOverflow;
+  }
+//  else if (cmdstring.charAt(2) == 'F') {  // message filter (reserviert)
+//	bptr=&musterDec.MfiltEnabled;
+//  }
 
   if (cmdstring.charAt(1) == 'E') {   // Enable
 	*bptr=true;
@@ -676,56 +987,79 @@ void configCMD()
   } else {
 	return;
   }
-  storeFunctions(musterDec.MSenabled, musterDec.MUenabled, musterDec.MCenabled);
+  storeFunctions(musterDec.MSenabled, musterDec.MUenabled, musterDec.MCenabled, musterDec.MredEnabled, musterDec.MdebEnabled, LEDenabled, musterDec.MuNoOverflow);
 }
 
-
-void IT_CMDs() {
-
-  // Set Intertechno receive tolerance
-  if (cmdstring.charAt(1) == 't') {
-    MSG_PRINTLN(cmdstring);
-  }
-  // Set Intertechno Repetition
-  else if (cmdstring.charAt(1) == 'r') {
-    char msg[3];
-    cmdstring.substring(2).toCharArray(msg,3);
-    ITrepetition = atoi(msg);
-    MSG_PRINTLN(cmdstring);
-  }
-  // Switch Intertechno Devices
-  else if (cmdstring.charAt(1) == 's') {
-    //digitalWrite(PIN_LED,HIGH);
-    digitalHigh(PIN_SEND);
-    char msg[40];
-    cmdstring.substring(2).toCharArray(msg,40);
-   	sendPT2262(msg);
-    //digitalWrite(PIN_LED,LOW);
-    digitalLow(PIN_SEND);
-    MSG_PRINTLN(cmdstring);
-  }
-  else if (cmdstring.charAt(1) == 'c') {
-	ITbaseduration=cmdstring.substring(2).toInt(); // Updates Baseduration
-    MSG_PRINTLN(cmdstring);
-  }
-  // Get Intertechno Parameters
-  else if (cmdstring.charAt(1) == 'p') {
-    String cPrint;
-    cPrint.reserve(20);
-    cPrint = "ITParams: ";
-    cPrint += String(ITrepetition);
-    cPrint += " ";
-    cPrint += String(ITbaseduration);
-    MSG_PRINTLN(cPrint);
-  }
-
+inline bool configSET()
+{ 
+	char buffer[12];
+	int16_t i = cmdstring.indexOf("=",4);
+	uint8_t n = 0;
+	uint8_t val;
+	uint16_t val16;
+	if (i < 0) {
+		return false;
+	}
+	while (n < CSetAnz) {
+		strcpy_P(buffer, (char*)pgm_read_word(&(CSetCmd[n])));
+		if (cmdstring.substring(2, i) == buffer) {
+			MSG_PRINT(buffer);
+			MSG_PRINT(F("="));
+			if (n < CSet16) {
+				val = cmdstring.substring(i+1).toInt();
+				MSG_PRINTLN(val);
+				EEPROM.write(CSetAddr[n], val);
+			}
+			else {
+				val16 = cmdstring.substring(i+1).toInt();
+				MSG_PRINTLN(val16);
+				val = (val16>>8) & 0xFF;
+				EEPROM.write(CSetAddr[n+(n-CSet16)], val);		// high
+				val = val16 & 0xFF;
+				EEPROM.write(CSetAddr[n+(n-CSet16)+1], val);	// low
+			}
+			break;
+		}
+		n++;
+	}
+	
+	if (n == 0) {  				// fifolimit
+		MdebFifoLimit = val;
+	}
+	else if (n == 1) {			// mcmbl
+		musterDec.mcMinBitLen = val;
+	}
+	else if (n == 2) {			// mscnt
+		musterDec.MsMoveCountmax = val;
+	}
+	else if (n == 3) {			// MuOverflMax
+		musterDec.MuOverflMax = val;
+	}
+	else if (n == 4) {			// maxnumpat
+		musterDec.cMaxNumPattern = val;
+	}
+	else if (n == 5) {			// muthresh
+		musterDec.MuSplitThresh = val16;
+	}
+	else if (n == 6) {			// maxpulse
+		if (val16 != 0) {
+			musterDec.cMaxPulse = -val16;
+		}
+		else {
+			musterDec.cMaxPulse = -maxPulse;
+		}
+	}
+	else {
+		return false;
+	}
+	return true;
 }
 
 void serialEvent()
 {
   while (MSG_PRINTER.available())
   {
-    char inChar = (char)MSG_PRINTER.read();
+    char inChar = (char)MSG_PRINTER.read(); 
     switch(inChar)
     {
     case '\n':
@@ -736,6 +1070,13 @@ void serialEvent()
 		break;
     default:
       cmdstring += inChar;
+    }
+    if (cmdstring.length() > maxCmdString)
+    {
+	cmdstring = "";				// todo die restlichen Zeichen ignorieren
+	MSG_PRINT(F("cmd to long! (max "));
+	MSG_PRINT(maxCmdString);
+	MSG_PRINTLN(F(")"));
     }
   }
 }
@@ -805,62 +1146,126 @@ int freeRam () {
 
  }
 
-unsigned long getUptime()
+inline unsigned long getUptime()
 {
 	unsigned long now = millis();
-	static uint16_t times_rolled = 0;
+	static uint8_t times_rolled = 0;
 	static unsigned long last = 0;
 	// If this run is less than the last the counter rolled
-	unsigned long seconds = now / 1000;
 	if (now < last) {
 		times_rolled++;
-		seconds += ((long(4294967295) / 1000 )*times_rolled);
 	}
 	last = now;
-	return seconds;
+	return (0xFFFFFFFF / 1000) * times_rolled + (now / 1000);
 }
 
-void getPing()
+inline void getPing()
 {
-	MSG_PRINTLN("OK");
-	delay(1);
+	MSG_PRINTLN(F("OK"));
+	delayMicroseconds(500);
 }
 
-void changeReciver() {
+inline void changeReceiver() {
   if (cmdstring.charAt(1) == 'Q')
   {
   	disableReceive();
   }
   if (cmdstring.charAt(1) == 'E')
   {
+#ifndef SENDTODECODER
   	enableReceive();
+#endif
   }
 }
 
-
-
+  void printHex2(const byte hex) {   // Todo: printf oder scanf nutzen
+    if (hex < 16) {
+      MSG_PRINT("0");
+    }
+    MSG_PRINT(hex, HEX);
+  }
 
 
 
 //================================= EEProm commands ======================================
 
-
-
-void storeFunctions(const int8_t ms, int8_t mu, int8_t mc)
+void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t deb, int8_t led, int8_t overfl)
 {
 	mu=mu<<1;
 	mc=mc<<2;
-	int8_t dat =  ms | mu | mc;
+	red=red<<3;
+	deb=deb<<4;
+	led=led<<5;
+	overfl=overfl<<6;
+	int8_t dat =  ms | mu | mc | red | deb | led | overfl | 0x80;
     EEPROM.write(addr_features,dat);
 }
 
-void getFunctions(bool *ms,bool *mu,bool *mc)
+void callGetFunctions(void)
 {
+	 getFunctions(&musterDec.MSenabled, &musterDec.MUenabled, &musterDec.MCenabled, &musterDec.MredEnabled, &musterDec.MdebEnabled, &LEDenabled, &musterDec.MuNoOverflow);
+}
+
+void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl)
+{
+    int8_t high;
     int8_t dat = EEPROM.read(addr_features);
 
     *ms=bool (dat &(1<<0));
     *mu=bool (dat &(1<<1));
     *mc=bool (dat &(1<<2));
+    *red=bool (dat &(1<<3));
+    *deb=bool (dat &(1<<4));
+    *led=bool (dat &(1<<5));
+    *overfl=bool (dat &(1<<6));
+    
+    MdebFifoLimit = EEPROM.read(CSetAddr[0]);
+    musterDec.MsMoveCountmax = EEPROM.read(CSetAddr[2]);
+    musterDec.MuOverflMax = EEPROM.read(CSetAddr[3]);
+    musterDec.cMaxNumPattern = EEPROM.read(CSetAddr[4]);
+    high = EEPROM.read(CSetAddr[CSet16]);
+    musterDec.MuSplitThresh = EEPROM.read(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
+    high = EEPROM.read(CSetAddr[CSet16+2]);
+    musterDec.cMaxPulse = EEPROM.read(CSetAddr[CSet16+3]) + ((high << 8) & 0xFF00);
+    if (musterDec.cMaxPulse == 0) {
+       musterDec.cMaxPulse = maxPulse;
+    }
+    musterDec.cMaxPulse = -musterDec.cMaxPulse;
+    musterDec.mcMinBitLen = EEPROM.read(CSetAddr[1]);
+    if (musterDec.mcMinBitLen == 0) {
+        musterDec.mcMinBitLen = mcMinBitLenDef;
+    }
+}
 
+void initEEPROMconfig(void)
+{
+	EEPROM.write(addr_features, 0xBF);    	// Init EEPROM with all flags enabled, except MuNoOverflow
+	for (uint8_t i = 0; i < CSetAnzEE; i++) {
+		EEPROM.write(CSetAddr[i], CSetDef[i]);
+	}
+	MSG_PRINTLN(F("Init eeprom to defaults"));
+}
 
+void initEEPROM(void)
+{
+  if (EEPROM.read(EE_MAGIC_OFFSET) == VERSION_1 && EEPROM.read(EE_MAGIC_OFFSET+1) == VERSION_2) {
+    
+  //if (musterDec.MdebEnabled) {
+    #ifdef DEBUG
+    MSG_PRINTLN(F("Reading values from eeprom"));
+    #endif
+  //}
+
+  } else {
+    initEEPROMconfig();
+    //storeFunctions(1, 1, 1);    // Init EEPROM with all flags enabled
+    #ifdef CMP_CC1101
+       if (EEPROM.read(EE_MAGIC_OFFSET) != VERSION_1) {  // ccFactoryReset nur wenn VERSION_1 nicht passt
+          cc1101::ccFactoryReset();
+       }
+    #endif
+    EEPROM.write(EE_MAGIC_OFFSET, VERSION_1);
+    EEPROM.write(EE_MAGIC_OFFSET+1, VERSION_2);
+  }
+  callGetFunctions();
 }
