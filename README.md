@@ -1,4 +1,4 @@
-# SIGNALDuino uC v3.3-0 (development version) with cc1101 support
+# SIGNALDuino uC 3.3.3 (development version) with cc1101 xFSK and FIFO support
 
 ### Getting started
 
