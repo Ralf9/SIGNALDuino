@@ -53,9 +53,9 @@
 
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.2.2-rc10"
+#define PROGVERS               "3.3.3.0-dev"
 #define VERSION_1               0x33
-#define VERSION_2               0x22
+#define VERSION_2               0x30
 
 #ifdef CMP_CC1101
 	#ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
@@ -83,7 +83,7 @@
 
 
 #define BAUDRATE               57600
-#define FIFO_LENGTH            140      // 50
+#define FIFO_LENGTH            140 // 50
 
 //#define WATCHDOG	1 // Der Watchdog ist in der Entwicklungs und Testphase deaktiviert. Es muss auch ohne Watchdog stabil funktionieren.
 //#define DEBUGSENDCMD  1
@@ -119,25 +119,28 @@ volatile unsigned long lastTime = micros();
 bool hasCC1101 = false;
 bool LEDenabled = true;
 uint8_t MdebFifoLimit = 120;
+uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO mit sync, 2 - FIFO ohne sync
+uint8_t fifoLen;
+uint8_t fifoLenOld = 255;
 
-#define CSetAnz 7
-#define CSetAnzEE 9
-#define CSet16 5
-#define CSetLow 7
+#define CSetAnz 8
+#define CSetAnzEE 10
+#define CSet16 6
 
-//const char *CSetCmd[] = {"fifolimit", "mcmbl", "mscnt", "muoverflmax", "maxnumpat", "muthresh", "L",  "maxpulse", "L"  };
-const uint8_t CSetAddr[] = {  0xf0,     0xf1,    0xf2,    0xf3,          0xf4,        0xf5,       0xf6, 0xf7,       0xf8 };
-const uint8_t CSetDef[] =  {    120,       0,       4,       3,             8,           0,          0,    0,          0 };
+//const char *CSetCmd[] = {"fifolimit", "mcmbl", "mscnt", "muoverflmax", "maxnumpat", "ccmode", "muthresh", "L",  "maxpulse", "L"  };
+const uint8_t CSetAddr[] = {  0xf0,     0xf1,    0xf2,    0xf3,          0xf4,         0xf9,     0xf5,       0xf6, 0xf7,       0xf8 };
+const uint8_t CSetDef[] =  {    120,       0,       4,       3,             8,           0,         0,          0,    0,          0 };
 
 const char string_0[] PROGMEM = "fifolimit";
 const char string_1[] PROGMEM = "mcmbl";
 const char string_2[] PROGMEM = "mscnt";
 const char string_3[] PROGMEM = "muoverflmax";
 const char string_4[] PROGMEM = "maxnumpat";
-const char string_5[] PROGMEM = "muthresh";
-const char string_6[] PROGMEM = "maxpulse";
+const char string_5[] PROGMEM = "ccmode";
+const char string_6[] PROGMEM = "muthresh";
+const char string_7[] PROGMEM = "maxpulse";
 
-const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6};
+const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6, string_7};
 
 #ifdef CMP_MEMDBG
 
@@ -248,8 +251,6 @@ void setup() {
 	cc1101::setup();
 #endif
   	initEEPROM();
-        //musterDec.MsMoveCount = 0;
-	
 #ifdef CMP_CC1101
 	MSG_PRINT(F("CCInit "));	
 	cc1101::CCinit();				// CC1101 init
@@ -305,7 +306,7 @@ void cronjob() {
 	static uint8_t cnt1 = 0;
 	 const unsigned long  duration = micros() - lastTime;
 	 
-	 if (duration > maxPulse) { //Auf Maximalwert pruefen.
+	 if (duration > maxPulse && ccmode == 0) { //Auf Maximalwert pruefen.
 		 int sDuration = maxPulse;
 		 if (isLow(PIN_RECEIVE)) { // Wenn jetzt low ist, ist auch weiterhin low
 			 sDuration = -sDuration;
@@ -346,6 +347,7 @@ void loop() {
 #ifdef WATCHDOG
 	wdt_reset();
 #endif
+  if (ccmode == 0) {
 	musterDec.printMsgSuccess = false;
 	musterDec.NoMsgEnd = false;
 	while (FiFo.count()>0 ) { //Puffer auslesen und an Dekoder uebergeben
@@ -374,7 +376,18 @@ void loop() {
 		}
 		musterDec.printMsgSuccess = false;
 	}
+  }
+  else {
+	if (isHigh(PIN_RECEIVE)) {  // wait for CC1100_FIFOTHR given bytes to arrive in FIFO
+		fifoLen = cc1101::getRXBYTES(); // & 0x7f; // read len, transfer RX fifo
+		if (fifoLen != fifoLenOld) {
+			MSG_PRINT(F("rxlen="));
+			MSG_PRINTLN("fifoLen");
+			fifoLenOld = fifoLen;
+		}
+	}
 
+  }
  }
 
 
@@ -407,7 +420,9 @@ void handleInterrupt() {
 }
 
 void enableReceive() {
-	attachInterrupt(digitalPinToInterrupt(PIN_RECEIVE), handleInterrupt, CHANGE);
+   if (ccmode == 0) {	// normal
+     attachInterrupt(digitalPinToInterrupt(PIN_RECEIVE), handleInterrupt, CHANGE);
+   }
    #ifdef CMP_CC1101
    if (hasCC1101) cc1101::setReceiveMode();
    #endif
@@ -425,9 +440,10 @@ void disableReceive() {
 
 /*void send_rawx(const uint8_t startpos,const uint16_t endpos,const int16_t *buckets, String *source=&cmdstring)
 {
-  int16_t sendarr[] ={200,-200,300,-300,500,-400,600,-600,800,-800,500,-500,200,-200,300,-300,500,-400,600,-600,800,-800,500,-500,200,-200,500,-300,400,-400,500,-600,800,-800,500,-500,200,-200,300,-300,400,-400,600,-600,1100,-1100,800,-800,500,-500};
+//  int16_t sendarr[] ={200,-200,300,-300,500,-400,600,-600,800,-800,500,-500,200,-200,300,-300,500,-400,600,-600,800,-800,500,-500,200,-200,500,-300,400,-400,500,-600,800,-800,500,-500,200,-200,300,-300,400,-400,600,-600,1100,-1100,800,-800,500,-500};
+  int16_t sendarr[] = {-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-1400,1724,-154,260,-367,260,-154,940,-572,260,-154,260,-154,1312,-154,940,-367,468,-1200,940,-1200,260,-784,260,-154,260};
   int16_t p;
-  for (uint8_t i=0;i<50;i++ ) {
+  for (uint8_t i=0;i<62;i++ ) {
     p = sendarr[i];
     //MSG_PRINTLN(p);
     musterDec.decode(&p);
@@ -723,6 +739,21 @@ void send_cmd()
 }
 
 
+void send_ccFIFO()
+{
+	uint8_t repeats=1;  // Default is always one iteration so repeat is 1 if not set
+	uint8_t startpos=0;
+	uint8_t startdata=0;
+	uint8_t enddata=0;
+	
+	if (cmdstring.indexOf(";",0) == 2) {
+		startdata=3;
+		enddata = cmdstring.indexOf(";",startdata);		// search next   ";"
+		disableReceive();
+		cc1101::setTransmitMode();
+		cc1101::sendFIFO(startdata, enddata);
+	}
+}
 
 //================================= Kommandos ======================================
 void IT_CMDs();
@@ -797,7 +828,12 @@ void HandleCommand()
 	{
 		command_available=true;
 	} else {
-		send_cmd(); // Part of Send
+		if (cmdstring.charAt(1) != 'N') {
+			send_cmd(); // Part of Send
+		}
+		else {
+			send_ccFIFO();
+		}
 	}
   }
     // t: Uptime
@@ -902,6 +938,7 @@ uint8_t cmdstringPos2int(uint8_t pos) {
 
 inline void getConfig()
 {
+  if (ccmode == 0) {
    MSG_PRINT(F("MS="));
    MSG_PRINT(musterDec.MSenabled,DEC);
    MSG_PRINT(F(";MU="));
@@ -910,9 +947,11 @@ inline void getConfig()
    MSG_PRINT(musterDec.MCenabled, DEC);
    MSG_PRINT(F(";Mred="));
    MSG_PRINT(musterDec.MredEnabled, DEC);
+  }
    if (LEDenabled == false) {
       MSG_PRINT(F(";LED=0"));
    }
+  if (ccmode == 0) {
    if (musterDec.MuNoOverflow == true) {
       MSG_PRINT(F(";MuNoOverflow=1"));
    }
@@ -940,6 +979,11 @@ inline void getConfig()
       MSG_PRINT(F(";maxPulse="));
       MSG_PRINT(musterDec.cMaxPulse, DEC);
    }
+  }
+  else {
+    MSG_PRINT(F(";ccmode="));
+    MSG_PRINT(ccmode);
+  }
    if (musterDec.MdebEnabled) {
       MSG_PRINT(F(";MdebFifoLimit="));
       MSG_PRINT(MdebFifoLimit, DEC);
@@ -1038,10 +1082,13 @@ inline bool configSET()
 	else if (n == 4) {			// maxnumpat
 		musterDec.cMaxNumPattern = val;
 	}
-	else if (n == 5) {			// muthresh
+	else if (n == 5) {			// ccmode
+		ccmode = val;
+	}
+	else if (n == 6) {			// muthresh
 		musterDec.MuSplitThresh = val16;
 	}
-	else if (n == 6) {			// maxpulse
+	else if (n == 7) {			// maxpulse
 		if (val16 != 0) {
 			musterDec.cMaxPulse = -val16;
 		}
@@ -1223,6 +1270,10 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     musterDec.MsMoveCountmax = EEPROM.read(CSetAddr[2]);
     musterDec.MuOverflMax = EEPROM.read(CSetAddr[3]);
     musterDec.cMaxNumPattern = EEPROM.read(CSetAddr[4]);
+    ccmode = EEPROM.read(CSetAddr[5]);
+    if (ccmode > 2) {
+       ccmode = 0;
+    }
     high = EEPROM.read(CSetAddr[CSet16]);
     musterDec.MuSplitThresh = EEPROM.read(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
     high = EEPROM.read(CSetAddr[CSet16+2]);
