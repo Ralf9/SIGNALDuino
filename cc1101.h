@@ -41,13 +41,19 @@ namespace cc1101 {
 	#define CC1100_FREQ2       0x0D  // Frequency control word, high byte
 	#define CC1100_FREQ1       0x0E  // Frequency control word, middle byte
 	#define CC1100_FREQ0       0x0F  // Frequency control word, low byte
-	#define CC1100_PATABLE     0x3E  // 8 byte memory
 	#define CC1100_IOCFG2      0x00  // GDO2 output configuration
 	#define CC1100_PKTCTRL0    0x08  // Packet config register
+	
+	// Multi byte memory locations
+	#define CC1100_PATABLE          0x3E  // 8 byte memory
+	#define CC1100_TXFIFO           0x3F
+	#define CC1100_RXFIFO           0x3F
 
 	// Status registers
 	#define CC1100_RSSI      0x34 // Received signal strength indication
 	#define CC1100_MARCSTATE 0x35 // Control state machine state
+	#define CC1100_TXBYTES   0x3A // Underflow and # of bytes in TXFIFO
+	#define CC1100_RXBYTES   0x3B // Overflow and # of bytes in RXFIFO
 
 	// Strobe commands
 	#define CC1101_SRES     0x30  // reset
@@ -147,6 +153,17 @@ namespace cc1101 {
 		return hex;
 		// printf ("%d\n",$hex) ??
 	}
+	
+	uint8_t cmdstringPos2int(uint8_t pos) {
+		uint8_t val;
+		uint8_t hex;
+
+		hex = (uint8_t)cmdstring.charAt(pos);
+		val = hex2int(hex) * 16;
+		hex = (uint8_t)cmdstring.charAt(pos+1);
+		val = hex2int(hex) + val;
+		return val;
+	}
 
 	void printHex2(const byte hex) {   // Todo: printf oder scanf nutzen
 		if (hex < 16) {
@@ -156,8 +173,6 @@ namespace cc1101 {
 		//sprintf(hexstr, "%02X", hex);
 
 		MSG_PRINT(hex, HEX);
-
-
 	}
 
 
@@ -222,7 +237,7 @@ namespace cc1101 {
 		}
 			cc1101_Deselect();
 	}
-
+	
 
   void readCCreg(const uint8_t reg) {   // read CC11001 register
     uint8_t var;
@@ -334,8 +349,6 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 }
 
 
-  
-
 	void ccFactoryReset() {
 		for (uint8_t i = 0; i<sizeof(initVal); i++) {
         		EEPROM.write(EE_CC1100_CFG + i, pgm_read_byte(&initVal[i]));
@@ -347,19 +360,20 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 				EEPROM.write(EE_CC1100_PA + i, 0);
 			}
 		}
-		MSG_PRINTLN("ccFactoryReset done");  
+		MSG_PRINTLN(F("ccFactoryReset done"));  
 	}
 
 
 	uint8_t getCCVersion()
 	{
-		return readReg(0xF1,0x80);  // Version
+		return readReg(0xF1,CC1101_CONFIG);  // Version
 	}
 	
 	uint8_t getCCPartnum()
 	{
-		return readReg(0xF0,0x80);  // Partnum
+		return readReg(0xF0,CC1101_CONFIG);  // Partnum
 	}
+	
 	
 	inline void setup()
 	{
@@ -395,6 +409,25 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		return readReg(CC1100_RSSI, CC1101_STATUS);// Pruefen ob Umwandung von uint to int den richtigen Wert zurueck gibt
 	}
 	
+	uint8_t getRXBYTES()
+	{
+		return readReg(CC1100_RXBYTES,CC1101_CONFIG);  // 
+	}
+	
+	void sendFIFO(uint8_t start, uint8_t end) {
+		uint8_t val;
+
+		cc1101_Select();                                // select CC1101
+		waitV_Miso();                                    // wait until MISO goes low
+		sendSPI(CC1100_TXFIFO | CC1100_WRITE_BURST);   // send register address
+		for (uint8_t i = start; i < end; i+=2) {
+			val = cmdstringPos2int(i);
+			sendSPI(val);		// send value
+			//MSG_PRINTLN(val);
+		}
+		cc1101_Deselect();
+	}
+	
 	inline void setIdleMode()
 	{
 		cmdStrobe(CC1100_SIDLE);                             // Idle mode
@@ -408,7 +441,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 
 		while (maxloop-- &&	(cmdStrobe(CC1100_SRX) & CC1100_STATUS_STATE_BM) != CC1100_STATE_RX) // RX enable
 			delay(1);
-		if (maxloop == 0 )		DBG_PRINTLN("CC1101: Setting RX failed");
+		if (maxloop == 0 )		DBG_PRINTLN(F("CC1101: Setting RX failed"));
 
 	}
 
@@ -419,7 +452,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		uint8_t maxloop = 0xff;
 		while (maxloop-- && (cmdStrobe(CC1100_STX) & CC1100_STATUS_STATE_BM) != CC1100_STATE_TX)  // TX enable
 			delay(1);
-		if (maxloop == 0) DBG_PRINTLN("CC1101: Setting TX failed");
+		if (maxloop == 0) DBG_PRINTLN(F("CC1101: Setting TX failed"));
 	}
 
 	void CCinit(void) {                              // initialize CC1101
