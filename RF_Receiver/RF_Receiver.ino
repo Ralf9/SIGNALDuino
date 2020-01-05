@@ -108,9 +108,10 @@ SignalDetectorClass musterDec;
 #include "cc1101.h"
 
 #define pulseMin  90
-#define maxCmdString 350  //350 // 250
+#define maxCmdString 300  //350 // 250
 #define maxSendPattern 8
 #define mcMinBitLenDef   17
+#define ccMaxBuf 50
 volatile bool blinkLED = false;
 String cmdstring = "";
 char msg_cmd0 = ' ';
@@ -118,10 +119,10 @@ char msg_cmd1 = ' ';
 volatile unsigned long lastTime = micros();
 bool hasCC1101 = false;
 bool LEDenabled = true;
+bool sendOld = false;
 uint8_t MdebFifoLimit = 120;
-uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO mit sync, 2 - FIFO ohne sync
-uint8_t fifoLen;
-uint8_t fifoLenOld = 255;
+uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 - FIFO LaCrosse, 9 - FIFO mit Debug Ausgaben
+uint8_t ccBuf[ccMaxBuf];
 
 #define CSetAnz 8
 #define CSetAnzEE 10
@@ -207,6 +208,7 @@ void storeFunctions(const int8_t ms=1, int8_t mu=1, int8_t mc=1, int8_t red=1, i
 void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl);
 void initEEPROM(void);
 void changeReceiver();
+void setCCmode();
 uint8_t cmdstringPos2int(uint8_t pos);
 void printHex2(const byte hex);
 uint8_t rssiCallback() { return 0; };	// Dummy return if no rssi value can be retrieved from receiver
@@ -277,7 +279,9 @@ void setup() {
 		musterDec.setRSSICallback(&rssiCallback);	// Provide the RSSI Callback		
 #endif 
 
-	pinAsOutput(PIN_SEND);
+	if (ccmode == 0) {
+		pinAsOutput(PIN_SEND);
+	}
 	if (musterDec.MdebEnabled) {
 		MSG_PRINTLN(F("Starting timerjob"));
 	}
@@ -288,17 +292,23 @@ void setup() {
 
 	cmdstring.reserve(maxCmdString);
 
-        if (!hasCC1101 || cc1101::regCheck()) {
+#ifdef CMP_CC1101
+  if (hasCC1101) {
+	if (ccmode > 0 || cc1101::regCheck()) {
+#endif
 #ifndef SENDTODECODER
 		enableReceive();
 		if (musterDec.MdebEnabled) {
 			MSG_PRINTLN(F("receiver enabled"));
 		}
 #endif
+#ifdef CMP_CC1101
 	}
 	else {
-		MSG_PRINTLN(F("cc1101 is not correctly set. Please do a factory reset via command e"));
+		MSG_PRINTLN(F("cc1101 is for OOK not correctly set."));
 	}
+  }
+#endif
 }
 
 void cronjob() {
@@ -378,18 +388,61 @@ void loop() {
 	}
   }
   else {
+	uint8_t fifoBytes;
+	bool dup;		// true bei identischen Wiederholungen bei readRXFIFO
+
 	if (isHigh(PIN_RECEIVE)) {  // wait for CC1100_FIFOTHR given bytes to arrive in FIFO
-		fifoLen = cc1101::getRXBYTES(); // & 0x7f; // read len, transfer RX fifo
-		if (fifoLen != fifoLenOld) {
-			MSG_PRINT(F("rxlen="));
-			MSG_PRINTLN("fifoLen");
-			fifoLenOld = fifoLen;
+		if (LEDenabled) {
+			blinkLED=true;
 		}
+		fifoBytes = cc1101::getRXBYTES(); // & 0x7f; // read len, transfer RX fifo
+		if (fifoBytes > 0) {
+			uint8_t marcstate;
+			
+			if (ccmode == 9) {
+				MSG_PRINT(F("RX("));
+				MSG_PRINT(fifoBytes);
+				MSG_PRINT(F(") "));
+			}
+			if (fifoBytes < 0x80) {	// RXoverflow?
+				if (fifoBytes > ccMaxBuf) {
+					fifoBytes = ccMaxBuf;
+				}
+				dup = cc1101::readRXFIFO(fifoBytes);
+				if (ccmode != 2 || dup == false) {
+					if (ccmode != 9) {
+						MSG_PRINT(MSG_START);
+						MSG_PRINT(F("MN;D="));
+					}
+					for (uint8_t i = 0; i < fifoBytes; i++) {
+						printHex2(ccBuf[i]);
+						//MSG_PRINT(" ");
+					}
+					if (ccmode == 9) {
+						MSG_PRINT(F(" ("));
+						MSG_PRINT(cc1101::getRXBYTES());
+						MSG_PRINT(F(")"));
+					}
+					else {
+						MSG_PRINT(F(";"));
+						MSG_PRINT(MSG_END);
+						MSG_PRINT("\n");
+					}
+				}
+			}
+			marcstate = cc1101::getMARCSTATE();
+			if (ccmode == 9) {
+				MSG_PRINT(F(" M"));
+				MSG_PRINTLN(marcstate);
+			}
+			if (marcstate == 17 || ccmode == 3) {	// RXoverflow oder LaCrosse?
+				cc1101::flushrx();		// Flush the RX FIFO buffer
+				cc1101::setReceiveMode();
+			}
+		}
+	  }
 	}
-
-  }
  }
-
 
 
 
@@ -424,7 +477,10 @@ void enableReceive() {
      attachInterrupt(digitalPinToInterrupt(PIN_RECEIVE), handleInterrupt, CHANGE);
    }
    #ifdef CMP_CC1101
-   if (hasCC1101) cc1101::setReceiveMode();
+   if (hasCC1101) {
+     cc1101::setIdleMode();
+     cc1101::setReceiveMode();
+   }
    #endif
 }
 
@@ -907,7 +963,8 @@ void HandleCommand()
   else if (cmdstring.charAt(0) == cmd_ccFactoryReset) {
      if (cmdstring.charAt(1) == 'C') {
          initEEPROMconfig();
-	 callGetFunctions();
+         callGetFunctions();
+         setCCmode();
      } else if (hasCC1101) {
          cc1101::ccFactoryReset();
          cc1101::CCinit();
@@ -948,6 +1005,10 @@ inline void getConfig()
    MSG_PRINT(F(";Mred="));
    MSG_PRINT(musterDec.MredEnabled, DEC);
   }
+  else {
+    MSG_PRINT(F("ccmode="));
+    MSG_PRINT(ccmode);
+  }
    if (LEDenabled == false) {
       MSG_PRINT(F(";LED=0"));
    }
@@ -979,17 +1040,13 @@ inline void getConfig()
       MSG_PRINT(F(";maxPulse="));
       MSG_PRINT(musterDec.cMaxPulse, DEC);
    }
-  }
-  else {
-    MSG_PRINT(F(";ccmode="));
-    MSG_PRINT(ccmode);
-  }
    if (musterDec.MdebEnabled) {
       MSG_PRINT(F(";MdebFifoLimit="));
       MSG_PRINT(MdebFifoLimit, DEC);
       MSG_PRINT(F("/"));
       MSG_PRINT(FIFO_LENGTH, DEC);
    }
+  }
    MSG_PRINTLN("");
 }
 
@@ -1084,6 +1141,7 @@ inline bool configSET()
 	}
 	else if (n == 5) {			// ccmode
 		ccmode = val;
+		setCCmode();
 	}
 	else if (n == 6) {			// muthresh
 		musterDec.MuSplitThresh = val16;
@@ -1225,6 +1283,19 @@ inline void changeReceiver() {
   }
 }
 
+void setCCmode() {
+  if (ccmode == 0) {	// normal OOK
+    enableReceive();
+    pinAsOutput(PIN_SEND);
+  }
+  else {		// mit ccFIFO
+    pinAsInput(PIN_SEND);
+    disableReceive();
+    cc1101::flushrx();
+    enableReceive();
+  }
+}
+
   void printHex2(const byte hex) {   // Todo: printf oder scanf nutzen
     if (hex < 16) {
       MSG_PRINT("0");
@@ -1271,7 +1342,7 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     musterDec.MuOverflMax = EEPROM.read(CSetAddr[3]);
     musterDec.cMaxNumPattern = EEPROM.read(CSetAddr[4]);
     ccmode = EEPROM.read(CSetAddr[5]);
-    if (ccmode > 2) {
+    if (ccmode > 9) {
        ccmode = 0;
     }
     high = EEPROM.read(CSetAddr[CSet16]);
