@@ -53,9 +53,9 @@
 
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.3.0-dev"
+#define PROGVERS               "3.3.4.0-dev200111"
 #define VERSION_1               0x33
-#define VERSION_2               0x30
+#define VERSION_2               0x40
 
 #ifdef CMP_CC1101
 	#ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
@@ -108,10 +108,19 @@ SignalDetectorClass musterDec;
 #include "cc1101.h"
 
 #define pulseMin  90
-#define maxCmdString 300  //350 // 250
+#define maxCmdString 350  //350 // 250
 #define maxSendPattern 8
 #define mcMinBitLenDef   17
 #define ccMaxBuf 50
+
+// EEProm Address
+#define EE_MAGIC_OFFSET      0
+#define addr_togglesec       0x3D
+#define addr_ccmode          0x3E
+//#define addr_featuresB       0x3F
+#define addr_bank            0xFD
+#define addr_features        0xFF
+
 volatile bool blinkLED = false;
 String cmdstring = "";
 char msg_cmd0 = ' ';
@@ -119,18 +128,72 @@ char msg_cmd1 = ' ';
 volatile unsigned long lastTime = micros();
 bool hasCC1101 = false;
 bool LEDenabled = true;
-bool sendOld = false;
+bool toggleBankEnabled = false;
+bool RXenabled = true;			// 1 - enable receive, Zwischenspeicher zum enablereceive merken
+bool unsuppCmd = false;
 uint8_t MdebFifoLimit = 120;
+uint8_t bank = 0;
+uint16_t bankOffset = 0;
 uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 - FIFO LaCrosse, 9 - FIFO mit Debug Ausgaben
 uint8_t ccBuf[ccMaxBuf];
+
+void cmd_help_S();
+void cmd_help();
+void cmd_bank();
+void configCMD();
+void getConfig();
+void configSET();
+void cmd_config();
+void cmd_configFactoryReset();
+void cmd_ccFactoryReset();
+void getPing();
+void cmd_readEEPROM();
+void cmd_freeRam();
+void cmd_send();
+void cmd_uptime();
+void cmd_toggleBank();
+void cmd_Version();
+void cmd_writeEEPROM();
+void cmd_writePatable();
+void changeReceiver();
+
+//typedef void (* GenericFP)(int); //function pointer prototype to a function which takes an 'int' an returns 'void'
+#define cmdAnz 21
+const char cmd0[] =  {'?', '?', 'b', 'C', 'C', 'C', 'C', 'C', 'e', 'e', 'P', 'r', 'R', 'S', 't', 'T', 'V', 'W', 'x', 'X', 'X'};
+const char cmd1[] =  {'S', ' ', ' ', 'E', 'D', 'G', 'S', ' ', 'C', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'E', 'Q'};
+const bool cmdCC[] = {  0,   0,   0,   0,   0,   0,   0,   1,   0,   1,   0,   0,   0,   0,   0,   0,   0,   0,   1,   0,  0 };
+void (*cmdFP[])(void) = {
+		cmd_help_S, // ?S
+		cmd_help,	// ?
+		cmd_bank,	// b
+		configCMD,	// CE
+		configCMD,	// CD
+		getConfig,	// CG
+		configSET,  // CS
+		cmd_config,	// C
+		cmd_configFactoryReset,	// eC
+		cmd_ccFactoryReset,		// e
+		getPing,	// P
+		cmd_readEEPROM,	// r
+		cmd_freeRam,	// R
+		cmd_send,	// S
+		cmd_uptime,	// t
+		cmd_toggleBank, // T
+		cmd_Version,	// V
+		cmd_writeEEPROM,// W
+		cmd_writePatable,// x
+		changeReceiver,	// XE
+		changeReceiver	// XQ
+		};
 
 #define CSetAnz 8
 #define CSetAnzEE 10
 #define CSet16 6
+#define CSccmode 5
 
 //const char *CSetCmd[] = {"fifolimit", "mcmbl", "mscnt", "muoverflmax", "maxnumpat", "ccmode", "muthresh", "L",  "maxpulse", "L"  };
-const uint8_t CSetAddr[] = {  0xf0,     0xf1,    0xf2,    0xf3,          0xf4,         0xf9,     0xf5,       0xf6, 0xf7,       0xf8 };
-const uint8_t CSetDef[] =  {    120,       0,       4,       3,             8,           0,         0,          0,    0,          0 };
+const uint8_t CSetAddr[] = {  0xf0,     0xf1,    0xf2,    0xf3,          0xf4,     addr_ccmode,       0xf5,  0xf6, 0xf7,      0xf8 };
+const uint8_t CSetDef[] =  {    120,       0,       4,       3,             8,               0,          0,     0,    0,         0 };
 
 const char string_0[] PROGMEM = "fifolimit";
 const char string_1[] PROGMEM = "mcmbl";
@@ -185,29 +248,18 @@ int16_t freeMem2=0;  // available ram calculation #2
 
 #endif  // CMP_MEMDBG
 
-
-// EEProm Address
-#define EE_MAGIC_OFFSET      0
-#define addr_features        0xff
-
 void handleInterrupt();
 void enableReceive();
 void disableReceive();
 void serialEvent();
 void cronjob();
 int freeRam();
-void changeReciver();
-void changeFilter();
 void HandleCommand();
 bool command_available=false;
 unsigned long getUptime();
-void getConfig();
-void getPing();
-void configCMD();
 void storeFunctions(const int8_t ms=1, int8_t mu=1, int8_t mc=1, int8_t red=1, int8_t deb=0, int8_t led=1, int8_t overfl=0);
 void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl);
 void initEEPROM(void);
-void changeReceiver();
 void setCCmode();
 uint8_t cmdstringPos2int(uint8_t pos);
 void printHex2(const byte hex);
@@ -287,7 +339,7 @@ void setup() {
 	}
 	delay(50);
 
-	Timer1.initialize(31*1000); //Interrupt wird jede n Millisekunden ausgeloest
+	Timer1.initialize(31*1000); //Interrupt wird jede 31 Millisekunden ausgeloest
 	Timer1.attachInterrupt(cronjob);
 
 	cmdstring.reserve(maxCmdString);
@@ -473,6 +525,7 @@ void handleInterrupt() {
 }
 
 void enableReceive() {
+  if (RXenabled == true) {
    if (ccmode == 0) {	// normal
      attachInterrupt(digitalPinToInterrupt(PIN_RECEIVE), handleInterrupt, CHANGE);
    }
@@ -482,6 +535,7 @@ void enableReceive() {
      cc1101::setReceiveMode();
    }
    #endif
+  }
 }
 
 void disableReceive() {
@@ -747,7 +801,7 @@ void send_cmd()
 
 	if (startdata == -1 || command[0].datastart == 0)
 	{
-		MSG_PRINT(F("send failed"));
+		MSG_PRINT(F("send failed!"));
 	} else
 	{
 #ifndef SENDTODECODER
@@ -798,16 +852,48 @@ void send_cmd()
 void send_ccFIFO()
 {
 	uint8_t repeats=1;  // Default is always one iteration so repeat is 1 if not set
-	uint8_t startpos=0;
+	int8_t startpos=0;
 	uint8_t startdata=0;
 	uint8_t enddata=0;
 	
-	if (cmdstring.indexOf(";",0) == 2) {
-		startdata=3;
+	startpos = cmdstring.indexOf(";R=",2);
+	if (startpos < 0) {		// kein repeat
+		startpos = 0;
+	}
+	startdata = cmdstring.indexOf(";D=",2);
+	if (startdata != -1) {
+		if (startpos > 0) {
+			repeats = cmdstring.substring(startpos+3, startdata).toInt();
+			if (repeats > 50) {
+				repeats = 50;
+			}
+		}
+		//MSG_PRINT(F("repeats="));
+		//MSG_PRINT(repeats);
+
+		//MSG_PRINT(F(" rdat="));
+		startdata += 3;
+		//MSG_PRINT(cmdstring.substring(startdata));
 		enddata = cmdstring.indexOf(";",startdata);		// search next   ";"
-		disableReceive();
-		cc1101::setTransmitMode();
-		cc1101::sendFIFO(startdata, enddata);
+		//MSG_PRINT(F(" end="));
+		//MSG_PRINTLN(enddata);
+		if (enddata > startdata) {
+			disableReceive();
+			for (uint8_t i = 0; i < repeats; i++) {
+				cc1101::setTransmitMode();
+				cc1101::sendFIFO(startdata, enddata);
+			}
+			MSG_PRINT(cmdstring); // echo
+			MSG_PRINT(F("Marcs="));
+			MSG_PRINTLN(cc1101::getMARCSTATE());
+		}
+		else {
+			startdata = -1;
+		}
+	}
+	if (startdata == -1)
+	{
+		MSG_PRINTLN(F("send failed!"));
 	}
 }
 
@@ -816,71 +902,161 @@ void IT_CMDs();
 
 void HandleCommand()
 {
-  uint8_t reg;
-  uint8_t val;
-  char buffer[12];
-  
-  #define  cmd_Version 'V'
-  #define  cmd_freeRam 'R'
-  #define  cmd_uptime 't'
-  #define  cmd_changeReceiver 'X'
-  #define  cmd_space ' '
-  #define  cmd_help '?'
-//#define  cmd_changeFilter 'F'
-  #define  cmd_send 'S'
-  #define  cmd_ping 'P'
-  #define  cmd_config 'C'     // CG get config, set config, C<reg> get CC1101 register
-  #define  cmd_write 'W'      // write EEPROM und write CC1101 register
-  #define  cmd_read  'r'      // read EEPROM
-  #define  cmd_patable 'x' 
-  #define  cmd_ccFactoryReset 'e'  // EEPROM / factory reset
+	uint8_t reg;
+	uint8_t val;
+	uint8_t i;
+	
+	for (i=0; i < cmdAnz; i++) {
+		if (cmdstring.charAt(0) == cmd0[i]) {
+			if (cmd1[i] == ' ' || (cmdstring.charAt(1) == cmd1[i])) {
+				break;
+			}
+		}
+	}
+	//MSG_PRINT(i);
+	unsuppCmd = false;
+	if (i < cmdAnz) {
+		//MSG_PRINT(F(" "));
+		//MSG_PRINT(cmd0[i]);
+		//MSG_PRINT(cmd1[i]);
+		cmdFP[i]();
+	}
+	//MSG_PRINTLN("");
+	
+	if (unsuppCmd) {
+		MSG_PRINTLN(F("Unsupported command"));
+	}
+}
 
-  bool unsuppCmd = false;
-  
-  if (cmdstring.charAt(0) == cmd_ping){
-	getPing();
-  }  // ?: Kommandos anzeigen
-  else if (cmdstring.charAt(0) == cmd_help) {
-    if (cmdstring.charAt(1) == 'S') {
+
+
+void cmd_help_S()	// get help configvariables
+{
+	char buffer[12];
 	for (uint8_t i = 0; i < CSetAnz; i++) {
 	    strcpy_P(buffer, (char*)pgm_read_word(&(CSetCmd[i])));
 	    MSG_PRINT(F("CS"));
 	    MSG_PRINT(buffer);
-	    //MSG_PRINT(CSetCmd[i]);
 	    MSG_PRINT(F("= "));
-        }
-	MSG_PRINTLN("");
-    } else {
-	MSG_PRINT(F("? Use one of V R t X S P C r W"));
-	if (hasCC1101) {
-		MSG_PRINT(F(" x e"));
 	}
 	MSG_PRINTLN("");
-    }
-  }
-  // V: Version
-  else if (cmdstring.charAt(0) == cmd_Version) {
-	  MSG_PRINT(F("V " PROGVERS " SIGNALduino "));
-	  if (hasCC1101) {
-		MSG_PRINT(F("cc1101 "));
+}
+
+void cmd_help()
+{
+	MSG_PRINT(F("? Use one of "));
+	for (uint8_t i = 0; i < cmdAnz; i++) {
+		MSG_PRINT(cmd0[i]);
+		if (cmd1[i] != ' ') {
+			MSG_PRINT(cmd1[i]);
+		}
+		MSG_PRINT(F(" "));
+	}
+	MSG_PRINTLN("");
+}
+
+void cmd_bank()
+{
+	if (cmdstring.charAt(1) == '?') {
+		print_Bank();
+	}
+	else if (isDigit(cmdstring.charAt(1))) {
+		uint8_t digit;
+		digit = (uint8_t)cmdstring.charAt(1);
+		bank = cc1101::hex2int(digit);
+		bankOffset = getBankOffset(bank);
+		if (bank == 0 || cmdstring.charAt(0) == 'e' || (EEPROM.read(bankOffset) == bank && EEPROM.read(bankOffset + 1) == (255 - bank))) {
+			if (cmdstring.charAt(2) == 'W') {
+				EEPROM.write(addr_bank, bank);
+				MSG_PRINT(F("write "));
+			}
+			MSG_PRINT(F("set "));
+			ccmode = EEPROM.read(bankOffset + CSetAddr[CSccmode]);
+			if (ccmode == 255) {
+				ccmode = 0;
+				EEPROM.write(bankOffset + CSetAddr[CSccmode], ccmode);
+			}
+			if (cmdstring.charAt(0) != 'e') {
+				print_Bank();
+				cc1101::CCinit();
+				setCCmode();
+			}
+		}
+		else {
+			MSG_PRINTLN(F("Error! Bank "));
+			MSG_PRINT(bank);
+			MSG_PRINTLN(F(" is not initialized"));
+		}
+	}
+	else {
+		unsuppCmd = true;
+	}
+}
+
+uint16_t getBankOffset(uint8_t tmpBank)
+{
+	uint16_t bankOffs;
+	if (tmpBank == 0) {
+		bankOffs = 0;
+	}
+	else {
+		bankOffs = 0x100 + ((tmpBank - 1) * 0x40);
+	}
+	return bankOffs;
+}
+
+void print_Bank()
+{
+	char hexString[6];
+	
+	MSG_PRINT(F("b="));
+	MSG_PRINT(bank);
+	MSG_PRINT(F(" ccmode="));
+	MSG_PRINT(ccmode);
+	MSG_PRINT(F(" sync="));
+	printHex2(EEPROM.read(bankOffset + 2 + CC1101_SYNC1));
+	printHex2(EEPROM.read(bankOffset + 2 + CC1101_SYNC0));
+	MSG_PRINT(F(" ccconf="));
+	for (uint8_t i = 0x0F; i <= 0x1F; i++) {
+		printHex2(EEPROM.read(bankOffset + i));
+	}
+	MSG_PRINT(F(" boffs="));
+	sprintf(hexString, "%04X", bankOffset);
+	MSG_PRINTLN(hexString);
+}
+
+void cmd_Version()	// V: Version
+{
+	MSG_PRINT(F("V " PROGVERS " SIGNALduino "));
+	if (hasCC1101) {
+	    MSG_PRINT(F("cc1101 "));
 #ifdef PIN_MARK433
 	    MSG_PRINT(F("(minicul "));
 	    MSG_PRINT(isLow(PIN_MARK433) ? "433" : "868");
 	    MSG_PRINT(F("Mhz) "));
 #endif
-      }
+	}
 #ifdef SENDTODECODER
 	MSG_PRINT(F("(no receive, only send to decoder) "));
 #endif
+	MSG_PRINT(F("(b"));
+	if (toggleBankEnabled == false) {
+		MSG_PRINT(bank);
+	} else {
+		MSG_PRINT(F("x"));
+	}
+	MSG_PRINT(F(") "));
 	MSG_PRINTLN(F("- compiled at " __DATE__ " " __TIME__));
+}
 
-  }
-  // R: FreeMemory
-  else if (cmdstring.charAt(0) == cmd_freeRam) {
-    MSG_PRINTLN(freeRam());
-  }
-  else if (cmdstring.charAt(0) == cmd_send) {
-  	if (musterDec.getState() != searching )
+void cmd_freeRam()	// R: FreeMemory
+{
+	MSG_PRINTLN(freeRam());
+}
+
+void cmd_send()
+{
+	if (musterDec.getState() != searching )
 	{
 		command_available=true;
 	} else {
@@ -891,53 +1067,117 @@ void HandleCommand()
 			send_ccFIFO();
 		}
 	}
-  }
-    // t: Uptime
-  else if (cmdstring.charAt(0) == cmd_uptime) {
-		MSG_PRINTLN(getUptime());
-  }
-  // XQ disable receiver
-  else if (cmdstring.charAt(0) == cmd_changeReceiver) {
-    changeReceiver();
-  }
-  //else if (cmdstring.charAt(0) == cmd_changeFilter) {
-  //}
-  else if (cmdstring.charAt(0) == cmd_config) {
-	  if (cmdstring.charAt(1) == 'G') {
-		  getConfig();
-	  }
-	  else if (cmdstring.charAt(1) == 'E' || cmdstring.charAt(1) == 'D') {  //Todo:  E und D sind auch hexadezimal, werden hier aber abgefangen
-		  configCMD();
-	  }
-	  else if (cmdstring.charAt(1) == 'S') {
-		  if (configSET() == false) {
-			unsuppCmd = true;
-		  }
-	  }
-      else if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2)) && hasCC1101) {
+}
+
+void cmd_uptime()	// t: Uptime
+{
+	MSG_PRINTLN(getUptime());
+}
+
+void cmd_toggleBank()	// T<bank><sec>
+{
+	uint8_t setBank;
+	uint8_t sec;
+	uint16_t bankOffs;
+	
+	if (cmdstring.charAt(1) == '?') {
+		MSG_PRINT(F("Toggle="));
+		for (uint8_t i = 0; i <= 9; i++) {
+			bankOffs = getBankOffset(i);
+			MSG_PRINT(F(" "));
+			sec = EEPROM.read(bankOffs + addr_togglesec);
+			if (sec > 99) {
+				sec = 0;
+				EEPROM.write(bankOffs + addr_togglesec, sec);
+			}
+			MSG_PRINT(sec * 10);
+		}
+		MSG_PRINTLN("");
+	}
+	else if (isDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2)) && isDigit(cmdstring.charAt(3))) {
+		uint8_t high;
+		uint8_t digit;
+		
+		setBank = (uint8_t)cmdstring.charAt(1);
+		setBank = cc1101::hex2int(setBank);
+		bankOffs = getBankOffset(setBank);
+		MSG_PRINT(F("setToggle b="));
+		MSG_PRINTLN(setBank);
+		digit = (uint8_t)cmdstring.charAt(2);
+		high = cc1101::hex2int(digit);
+		digit = (uint8_t)cmdstring.charAt(3);
+		sec = high * 10 + cc1101::hex2int(digit);
+		EEPROM.write(bankOffs + addr_togglesec, sec);
+		MSG_PRINT(F(" sec="));
+		MSG_PRINTLN(sec * 10);
+	}
+	else {
+		unsuppCmd = true;
+	}
+	
+}
+
+void cmd_config()	// C read ccRegister
+{
+	uint8_t reg;
+	
+	if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2))) {
 		reg = cmdstringPos2int(1);
 		cc1101::readCCreg(reg);
-      }
-    else {
-      unsuppCmd = true; 
-    }
-  }
-  else if (cmdstring.charAt(0) == cmd_write) {            // write EEPROM und CC11001 register
-    if (cmdstring.charAt(1) == 'S' && cmdstring.charAt(2) == '3' && hasCC1101)  {       // WS<reg>  Command Strobes
+	}
+	else {
+		unsuppCmd = true; 
+	}
+}
+
+void cmd_writeEEPROM()	// write EEPROM und CC11001 register
+{
+	uint8_t val;
+	uint8_t reg;
+	
+    if (cmdstring.charAt(1) == 'S' && cmdstring.charAt(2) == '3' && hasCC1101) {       // WS<reg>  Command Strobes
         cc1101::commandStrobes();
     } else if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2)) && isHexadecimalDigit(cmdstring.charAt(3)) && isHexadecimalDigit(cmdstring.charAt(4))) {
          reg = cmdstringPos2int(1);
          val = cmdstringPos2int(3);
-         EEPROM.write(reg, val);
+         EEPROM.write(bankOffset + reg, val);
          if (hasCC1101) {
            cc1101::writeCCreg(reg, val);
          }
     } else {
          unsuppCmd = true;
     }
-  }
-  // R<adr>  read EEPROM
-  else if (cmdstring.charAt(0) == cmd_read && isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2))) {             // R<adr>  read EEPROM
+}
+
+void cmd_readEEPROM()	// R<adr>  read EEPROM
+{
+	// rN<adr16>  read 64 Byte from EEPROM 
+	if (cmdstring.charAt(1) == 'N' && isHexadecimalDigit(cmdstring.charAt(2)) && isHexadecimalDigit(cmdstring.charAt(3)) && isHexadecimalDigit(cmdstring.charAt(4)) && isHexadecimalDigit(cmdstring.charAt(5))) {
+		uint16_t addr;
+		uint8_t high;
+		uint8_t low;
+		char hexString[6];
+		
+		high = cmdstringPos2int(2);
+		low = cmdstringPos2int(4);
+		addr = high * 256 + low;
+		
+		for (uint8_t j = 0; j < 4; j++) {
+			sprintf(hexString, "%04X", addr);
+			MSG_PRINT(F("EEPROM "));
+			MSG_PRINT(hexString);
+			MSG_PRINT(F(":"));
+			for (uint8_t i = 0; i < 16; i++) {
+				MSG_PRINT(F(" "));
+				printHex2(EEPROM.read(addr + i));
+			}
+			addr += 16;
+			MSG_PRINT(F("  "));
+		}
+		MSG_PRINTLN("");
+	}
+   else if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2))) {             // r<adr>  read EEPROM
+     uint8_t reg;
      reg = cmdstringPos2int(1);
      MSG_PRINT(F("EEPROM "));
      printHex2(reg);
@@ -945,39 +1185,54 @@ void HandleCommand()
          MSG_PRINT(F(" :"));
          for (uint8_t i = 0; i < 16; i++) {
              MSG_PRINT(F(" "));
-             printHex2(EEPROM.read(reg + i));
+             printHex2(EEPROM.read(bankOffset + reg + i));
          }
      } else {
         MSG_PRINT(F(" = "));
-        printHex2(EEPROM.read(reg));
+        printHex2(EEPROM.read(bankOffset + reg));
      }
      MSG_PRINTLN("");
+  } else {
+     unsuppCmd = true;
   }
-  else if (cmdstring.charAt(0) == cmd_patable && isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2)) && hasCC1101) {
+}
+
+void cmd_writePatable()
+{
+  uint8_t val;
+  if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2))) {
      val = cmdstringPos2int(1);
      cc1101::writeCCpatable(val);
      MSG_PRINT(F("Write "));
      printHex2(val);
      MSG_PRINTLN(F(" to PATABLE done"));
+  } else {
+     unsuppCmd = true;
   }
-  else if (cmdstring.charAt(0) == cmd_ccFactoryReset) {
-     if (cmdstring.charAt(1) == 'C') {
+}
+
+void cmd_configFactoryReset()	// eC - initEEPROMconfig
+{
          initEEPROMconfig();
          callGetFunctions();
          setCCmode();
-     } else if (hasCC1101) {
+}
+
+void cmd_ccFactoryReset()
+{
+         if (isDigit(cmdstring.charAt(1))) {
+            cmd_bank();
+         }
          cc1101::ccFactoryReset();
          cc1101::CCinit();
-     } else {
-         unsuppCmd = true;
-     }
-  }
-  else {
-      unsuppCmd = true;
-  }
-  if (unsuppCmd) {
-      MSG_PRINTLN(F("Unsupported command"));
-  }
+         ccmode = 0;
+         EEPROM.write(bankOffset + CSetAddr[CSccmode], ccmode);
+         setCCmode();
+         if (bank > 0) {
+            EEPROM.write(bankOffset, bank);
+            EEPROM.write(bankOffset + 1, (255 - bank));
+         }
+         print_Bank();
 }
 
 
@@ -991,7 +1246,6 @@ uint8_t cmdstringPos2int(uint8_t pos) {
        val = cc1101::hex2int(hex) + val;
        return val;
 }
-
 
 inline void getConfig()
 {
@@ -1011,6 +1265,12 @@ inline void getConfig()
   }
    if (LEDenabled == false) {
       MSG_PRINT(F(";LED=0"));
+   }
+   if (RXenabled == false) {
+      MSG_PRINT(F(";RX=0"));
+   }
+   if (toggleBankEnabled == true) {
+      MSG_PRINT(F(";toggleBank=1"));
    }
   if (ccmode == 0) {
    if (musterDec.MuNoOverflow == true) {
@@ -1076,9 +1336,9 @@ inline void configCMD()
   else if (cmdstring.charAt(2) == 'O') {  //
 	bptr=&musterDec.MuNoOverflow;
   }
-//  else if (cmdstring.charAt(2) == 'F') {  // message filter (reserviert)
-//	bptr=&musterDec.MfiltEnabled;
-//  }
+  else if (cmdstring.charAt(2) == 'T') {  // toggleBankEnabled
+	bptr=&toggleBankEnabled;
+  }
 
   if (cmdstring.charAt(1) == 'E') {   // Enable
 	*bptr=true;
@@ -1088,10 +1348,10 @@ inline void configCMD()
   } else {
 	return;
   }
-  storeFunctions(musterDec.MSenabled, musterDec.MUenabled, musterDec.MCenabled, musterDec.MredEnabled, musterDec.MdebEnabled, LEDenabled, musterDec.MuNoOverflow);
+  storeFunctions(musterDec.MSenabled, musterDec.MUenabled, musterDec.MCenabled, musterDec.MredEnabled, musterDec.MdebEnabled, LEDenabled, musterDec.MuNoOverflow, toggleBankEnabled);
 }
 
-inline bool configSET()
+inline void configSET()
 { 
 	char buffer[12];
 	int16_t i = cmdstring.indexOf("=",4);
@@ -1099,7 +1359,7 @@ inline bool configSET()
 	uint8_t val;
 	uint16_t val16;
 	if (i < 0) {
-		return false;
+		unsuppCmd = true;
 	}
 	while (n < CSetAnz) {
 		strcpy_P(buffer, (char*)pgm_read_word(&(CSetCmd[n])));
@@ -1109,7 +1369,11 @@ inline bool configSET()
 			if (n < CSet16) {
 				val = cmdstring.substring(i+1).toInt();
 				MSG_PRINTLN(val);
-				EEPROM.write(CSetAddr[n], val);
+				if (n == CSccmode) {
+					EEPROM.write(bankOffset + CSetAddr[n], val);
+				} else {
+					EEPROM.write(CSetAddr[n], val);
+				}
 			}
 			else {
 				val16 = cmdstring.substring(i+1).toInt();
@@ -1155,9 +1419,8 @@ inline bool configSET()
 		}
 	}
 	else {
-		return false;
+		unsuppCmd = true;
 	}
-	return true;
 }
 
 void serialEvent()
@@ -1274,11 +1537,15 @@ inline void changeReceiver() {
   if (cmdstring.charAt(1) == 'Q')
   {
   	disableReceive();
+	RXenabled = false;
+	MSG_PRINTLN("RX=0");
   }
   if (cmdstring.charAt(1) == 'E')
   {
 #ifndef SENDTODECODER
+	RXenabled = true;
   	enableReceive();
+	MSG_PRINTLN("RX=1");
 #endif
   }
 }
@@ -1307,7 +1574,7 @@ void setCCmode() {
 
 //================================= EEProm commands ======================================
 
-void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t deb, int8_t led, int8_t overfl)
+void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t deb, int8_t led, int8_t overfl, int8_t tgBank)
 {
 	mu=mu<<1;
 	mc=mc<<2;
@@ -1315,16 +1582,17 @@ void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t de
 	deb=deb<<4;
 	led=led<<5;
 	overfl=overfl<<6;
-	int8_t dat =  ms | mu | mc | red | deb | led | overfl | 0x80;
+	tgBank=tgBank<<7;
+	int8_t dat =  ms | mu | mc | red | deb | led | overfl | tgBank;
     EEPROM.write(addr_features,dat);
 }
 
 void callGetFunctions(void)
 {
-	 getFunctions(&musterDec.MSenabled, &musterDec.MUenabled, &musterDec.MCenabled, &musterDec.MredEnabled, &musterDec.MdebEnabled, &LEDenabled, &musterDec.MuNoOverflow);
+	 getFunctions(&musterDec.MSenabled, &musterDec.MUenabled, &musterDec.MCenabled, &musterDec.MredEnabled, &musterDec.MdebEnabled, &LEDenabled, &musterDec.MuNoOverflow, &toggleBankEnabled);
 }
 
-void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl)
+void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl, bool *tgBank)
 {
     int8_t high;
     int8_t dat = EEPROM.read(addr_features);
@@ -1336,14 +1604,21 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     *deb=bool (dat &(1<<4));
     *led=bool (dat &(1<<5));
     *overfl=bool (dat &(1<<6));
+    *tgBank= bool (dat &(1<<7));
     
     MdebFifoLimit = EEPROM.read(CSetAddr[0]);
     musterDec.MsMoveCountmax = EEPROM.read(CSetAddr[2]);
     musterDec.MuOverflMax = EEPROM.read(CSetAddr[3]);
     musterDec.cMaxNumPattern = EEPROM.read(CSetAddr[4]);
-    ccmode = EEPROM.read(CSetAddr[5]);
-    if (ccmode > 9) {
+    bank = EEPROM.read(addr_bank);
+    if (bank > 9) {
+      bank = 0;
+    }
+    bankOffset = getBankOffset(bank);
+    ccmode = EEPROM.read(bankOffset + CSetAddr[CSccmode]);
+    if (ccmode == 255) {
        ccmode = 0;
+       EEPROM.write(bankOffset + CSetAddr[CSccmode], ccmode);
     }
     high = EEPROM.read(CSetAddr[CSet16]);
     musterDec.MuSplitThresh = EEPROM.read(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
@@ -1361,7 +1636,8 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
 
 void initEEPROMconfig(void)
 {
-	EEPROM.write(addr_features, 0xBF);    	// Init EEPROM with all flags enabled, except MuNoOverflow
+	EEPROM.write(addr_features, 0x3F);    	// Init EEPROM with all flags enabled, except MuNoOverflow and toggleBank
+	
 	for (uint8_t i = 0; i < CSetAnzEE; i++) {
 		EEPROM.write(CSetAddr[i], CSetDef[i]);
 	}
