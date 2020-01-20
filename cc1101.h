@@ -12,6 +12,7 @@
 #include "output.h"
 
 
+extern uint16_t bankOffset;
 extern String cmdstring;
 extern uint8_t ccBuf[50];
 
@@ -39,11 +40,16 @@ namespace cc1101 {
 	#define CC1101_WRITE_BURST 0x40
 	#define CC1101_READ_BURST  0xC0
 	
+	#define CC1101_SYNC1       0x04
+	#define CC1101_SYNC0       0x05
 	#define CC1101_FREQ2       0x0D  // Frequency control word, high byte
 	#define CC1101_FREQ1       0x0E  // Frequency control word, middle byte
 	#define CC1101_FREQ0       0x0F  // Frequency control word, low byte
 	#define CC1101_IOCFG2      0x00  // GDO2 output configuration
 	#define CC1101_PKTCTRL0    0x08  // Packet config register
+	#define CC1101_MDMCFG4     0x10
+	#define CC1101_MDMCFG3     0x11
+	#define CC1101_MDMCFG2     0x12
 	
 	// Multi byte memory locations
 	#define CC1101_PATABLE          0x3E  // 8 byte memory
@@ -55,6 +61,19 @@ namespace cc1101 {
 	#define CC1101_MARCSTATE 0x35 // Control state machine state
 	#define CC1101_TXBYTES   0x3A // Underflow and # of bytes in TXFIFO
 	#define CC1101_RXBYTES   0x3B // Overflow and # of bytes in RXFIFO
+	
+	#define MARCSTATE_SLEEP            0x00
+	#define MARCSTATE_IDLE             0x01
+	#define MARCSTATE_XOFF             0x02
+	#define MARCSTATE_ENDCAL           0x0C
+	#define MARCSTATE_RX               0x0D
+	#define MARCSTATE_RX_END           0x0E
+	#define MARCSTATE_RX_RST           0x0F
+	#define MARCSTATE_RXFIFO_OVERFLOW  0x11
+	#define MARCSTATE_TX               0x13
+	#define MARCSTATE_TX_END           0x14
+	#define MARCSTATE_RXTX_SWITCH      0x15
+	#define MARCSTATE_TXFIFO_UNDERFLOW 0x16
 
 	// Strobe commands
 	#define CC1101_SRES     0x30  // reset
@@ -236,7 +255,7 @@ namespace cc1101 {
 		waitV_Miso();                                    // wait until MISO goes low
 		sendSPI(CC1101_PATABLE | CC1101_WRITE_BURST);   // send register address
 		for (uint8_t i = 0; i < 8; i++) {
-			sendSPI(EEPROM.read(EE_CC1101_PA+i));                     // send value
+			sendSPI(EEPROM.read(bankOffset + EE_CC1101_PA+i));                     // send value
 		}
 			cc1101_Deselect();
 	}
@@ -343,9 +362,9 @@ namespace cc1101 {
 void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa ramping)
 	for (uint8_t i = 0; i < 8; i++) {
 		if (i == 1) {
-			EEPROM.write(EE_CC1101_PA + i, var);
+			EEPROM.write(bankOffset + EE_CC1101_PA + i, var);
 		} else {
-			EEPROM.write(EE_CC1101_PA + i, 0);
+			EEPROM.write(bankOffset + EE_CC1101_PA + i, 0);
 		}
 	}
 	writePatable();
@@ -354,13 +373,13 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 
 	void ccFactoryReset() {
 		for (uint8_t i = 0; i<sizeof(initVal); i++) {
-        		EEPROM.write(EE_CC1101_CFG + i, pgm_read_byte(&initVal[i]));
+        		EEPROM.write(bankOffset + EE_CC1101_CFG + i, pgm_read_byte(&initVal[i]));
 		}
 		for (uint8_t i = 0; i < 8; i++) {
 			if (i == 1) {
-				EEPROM.write(EE_CC1101_PA + i, PATABLE_DEFAULT);
+				EEPROM.write(bankOffset + EE_CC1101_PA + i, PATABLE_DEFAULT);
 			} else {
-				EEPROM.write(EE_CC1101_PA + i, 0);
+				EEPROM.write(bankOffset + EE_CC1101_PA + i, 0);
 			}
 		}
 		MSG_PRINTLN(F("ccFactoryReset done"));  
@@ -448,16 +467,25 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 	
 	void sendFIFO(uint8_t start, uint8_t end) {
 		uint8_t val;
-
+		uint8_t i;
+		
 		cc1101_Select();                                // select CC1101
 		waitV_Miso();                                    // wait until MISO goes low
 		sendSPI(CC1101_TXFIFO | CC1101_WRITE_BURST);   // send register address
-		for (uint8_t i = start; i < end; i+=2) {
+		for (i = start; i < end; i+=2) {
 			val = cmdstringPos2int(i);
 			sendSPI(val);		// send value
-			//MSG_PRINTLN(val);
 		}
-		cc1101_Deselect();
+		cc1101_Deselect();	//Wait for sending to finish (CC1101 will go to RX state automatically
+
+		for(i=0; i< 200;++i) 
+		{
+			if( readReg(CC1101_MARCSTATE, CC1101_STATUS) != MARCSTATE_TX)
+				break; //neither in RX nor TX, probably some error
+			delay(1);
+		}
+		//MSG_PRINT(F("wtx="));
+		//MSG_PRINTLN(i);
 	}
 	
 	inline void setIdleMode()
@@ -514,7 +542,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		
 		sendSPI(CC1101_WRITE_BURST);
 		for (uint8_t i = 0; i<sizeof(initVal); i++) {              // write EEPROM value to cc1101
-			sendSPI(EEPROM.read(EE_CC1101_CFG + i));
+			sendSPI(EEPROM.read(bankOffset + EE_CC1101_CFG + i));
 		}
 		cc1101_Deselect();
 		delayMicroseconds(10);            // ### todo: welcher Wert ist als delay sinnvoll? ###
