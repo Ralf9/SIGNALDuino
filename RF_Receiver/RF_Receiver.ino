@@ -53,7 +53,7 @@
 
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.4.0-dev200111"
+#define PROGVERS               "3.3.4.0-dev200121"
 #define VERSION_1               0x33
 #define VERSION_2               0x40
 
@@ -115,7 +115,8 @@ SignalDetectorClass musterDec;
 
 // EEProm Address
 #define EE_MAGIC_OFFSET      0
-#define addr_togglesec       0x3D
+#define addr_togglesec       0x3C
+#define addr_ccN             0x3D
 #define addr_ccmode          0x3E
 //#define addr_featuresB       0x3F
 #define addr_bank            0xFD
@@ -134,6 +135,7 @@ bool unsuppCmd = false;
 uint8_t MdebFifoLimit = 120;
 uint8_t bank = 0;
 uint16_t bankOffset = 0;
+uint8_t ccN = 0;
 uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 - FIFO LaCrosse, 9 - FIFO mit Debug Ausgaben
 uint8_t ccBuf[ccMaxBuf];
 
@@ -143,6 +145,7 @@ void cmd_bank();
 void configCMD();
 void getConfig();
 void configSET();
+void ccRegWrite();
 void cmd_config();
 void cmd_configFactoryReset();
 void cmd_ccFactoryReset();
@@ -158,10 +161,10 @@ void cmd_writePatable();
 void changeReceiver();
 
 //typedef void (* GenericFP)(int); //function pointer prototype to a function which takes an 'int' an returns 'void'
-#define cmdAnz 21
-const char cmd0[] =  {'?', '?', 'b', 'C', 'C', 'C', 'C', 'C', 'e', 'e', 'P', 'r', 'R', 'S', 't', 'T', 'V', 'W', 'x', 'X', 'X'};
-const char cmd1[] =  {'S', ' ', ' ', 'E', 'D', 'G', 'S', ' ', 'C', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'E', 'Q'};
-const bool cmdCC[] = {  0,   0,   0,   0,   0,   0,   0,   1,   0,   1,   0,   0,   0,   0,   0,   0,   0,   0,   1,   0,  0 };
+#define cmdAnz 22
+const char cmd0[] =  {'?', '?', 'b', 'C', 'C', 'C', 'C', 'C', 'C', 'e', 'e', 'P', 'r', 'R', 'S', 't', 'T', 'V', 'W', 'x', 'X', 'X'};
+const char cmd1[] =  {'S', ' ', ' ', 'E', 'D', 'G', 'S', 'W', ' ', 'C', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'E', 'Q'};
+const bool cmdCC[] = {  0,   0,   0,   0,   0,   0,   0,   1,   1,   0,   1,   0,   0,   0,   0,   0,   0,   0,   0,   1,   0,  0 };
 void (*cmdFP[])(void) = {
 		cmd_help_S, // ?S
 		cmd_help,	// ?
@@ -169,7 +172,8 @@ void (*cmdFP[])(void) = {
 		configCMD,	// CE
 		configCMD,	// CD
 		getConfig,	// CG
-		configSET,  // CS
+		configSET,	// CS
+		ccRegWrite,	// CW
 		cmd_config,	// C
 		cmd_configFactoryReset,	// eC
 		cmd_ccFactoryReset,		// e
@@ -186,25 +190,27 @@ void (*cmdFP[])(void) = {
 		changeReceiver	// XQ
 		};
 
-#define CSetAnz 8
-#define CSetAnzEE 10
-#define CSet16 6
-#define CSccmode 5
+#define CSetAnz 9
+#define CSetAnzEE 11
+#define CSet16 7
+#define CSccN 5
+#define CSccmode 6
 
-//const char *CSetCmd[] = {"fifolimit", "mcmbl", "mscnt", "muoverflmax", "maxnumpat", "ccmode", "muthresh", "L",  "maxpulse", "L"  };
-const uint8_t CSetAddr[] = {  0xf0,     0xf1,    0xf2,    0xf3,          0xf4,     addr_ccmode,       0xf5,  0xf6, 0xf7,      0xf8 };
-const uint8_t CSetDef[] =  {    120,       0,       4,       3,             8,               0,          0,     0,    0,         0 };
+//const char *CSetCmd[] = {"fifolimit", "mcmbl", "mscnt", "muoverflmax", "maxnumpat", "ccN",    "ccmode", "muthresh", "L",  "maxpulse", "L"  };
+const uint8_t CSetAddr[] = {  0xf0,     0xf1,    0xf2,    0xf3,          0xf4,     addr_ccN, addr_ccmode,       0xf5,  0xf6, 0xf7,      0xf8 };
+const uint8_t CSetDef[] =  {    120,       0,       4,       3,             8,            0,           0,          0,     0,    0,         0 };
 
 const char string_0[] PROGMEM = "fifolimit";
 const char string_1[] PROGMEM = "mcmbl";
 const char string_2[] PROGMEM = "mscnt";
 const char string_3[] PROGMEM = "muoverflmax";
 const char string_4[] PROGMEM = "maxnumpat";
-const char string_5[] PROGMEM = "ccmode";
-const char string_6[] PROGMEM = "muthresh";
-const char string_7[] PROGMEM = "maxpulse";
+const char string_5[] PROGMEM = "ccN";
+const char string_6[] PROGMEM = "ccmode";
+const char string_7[] PROGMEM = "muthresh";
+const char string_8[] PROGMEM = "maxpulse";
 
-const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6, string_7};
+const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6, string_7, string_8};
 
 #ifdef CMP_MEMDBG
 
@@ -476,6 +482,10 @@ void loop() {
 						MSG_PRINT(F(")"));
 					}
 					else {
+						if (ccN > 0) {
+							MSG_PRINT(F(";N="));
+							MSG_PRINT(ccN);
+						}
 						MSG_PRINT(F(";"));
 						MSG_PRINT(MSG_END);
 						MSG_PRINT("\n");
@@ -853,27 +863,39 @@ void send_ccFIFO()
 {
 	uint8_t repeats=1;  // Default is always one iteration so repeat is 1 if not set
 	int8_t startpos=0;
+	int8_t endpos=0;
+	int8_t startn=0;
+	int8_t sendN=0;
 	uint8_t startdata=0;
 	uint8_t enddata=0;
 	
 	startpos = cmdstring.indexOf(";R=",2);
-	if (startpos < 0) {		// kein repeat
-		startpos = 0;
-	}
+	
+	startn = cmdstring.indexOf(";N=",2);
+	
 	startdata = cmdstring.indexOf(";D=",2);
-	if (startdata != -1) {
+	if (startdata > 0) {
+		if (startn > 0) {	// N= gefunden
+			endpos = startn;
+			sendN = cmdstring.substring(startn+3, startdata).toInt();
+		}
+		else {
+			endpos = startdata;
+		}
 		if (startpos > 0) {
-			repeats = cmdstring.substring(startpos+3, startdata).toInt();
+			repeats = cmdstring.substring(startpos+3, endpos).toInt();
 			if (repeats > 50) {
 				repeats = 50;
 			}
 		}
-		//MSG_PRINT(F("repeats="));
-		//MSG_PRINT(repeats);
-
-		//MSG_PRINT(F(" rdat="));
 		startdata += 3;
-		//MSG_PRINT(cmdstring.substring(startdata));
+		
+		/*MSG_PRINT(F("repeats="));
+		MSG_PRINT(repeats);
+		MSG_PRINT(F(" N="));
+		MSG_PRINT(sendN);
+		MSG_PRINT(F(" senddat="));
+		MSG_PRINTLN(cmdstring.substring(startdata));*/
 		enddata = cmdstring.indexOf(";",startdata);		// search next   ";"
 		//MSG_PRINT(F(" end="));
 		//MSG_PRINTLN(enddata);
@@ -946,11 +968,13 @@ void cmd_help()
 {
 	MSG_PRINT(F("? Use one of "));
 	for (uint8_t i = 0; i < cmdAnz; i++) {
-		MSG_PRINT(cmd0[i]);
-		if (cmd1[i] != ' ') {
-			MSG_PRINT(cmd1[i]);
+		if (hasCC1101 || cmdCC[i] == 0) {
+			MSG_PRINT(cmd0[i]);
+			if (cmd1[i] != ' ') {
+				MSG_PRINT(cmd1[i]);
+			}
+			MSG_PRINT(F(" "));
 		}
-		MSG_PRINT(F(" "));
 	}
 	MSG_PRINTLN("");
 }
@@ -971,10 +995,11 @@ void cmd_bank()
 				MSG_PRINT(F("write "));
 			}
 			MSG_PRINT(F("set "));
-			ccmode = EEPROM.read(bankOffset + CSetAddr[CSccmode]);
+			ccN = EEPROM.read(bankOffset + addr_ccN);
+			ccmode = EEPROM.read(bankOffset + addr_ccmode);
 			if (ccmode == 255) {
 				ccmode = 0;
-				EEPROM.write(bankOffset + CSetAddr[CSccmode], ccmode);
+				EEPROM.write(bankOffset + addr_ccmode, ccmode);
 			}
 			if (cmdstring.charAt(0) != 'e') {
 				print_Bank();
@@ -1011,6 +1036,10 @@ void print_Bank()
 	
 	MSG_PRINT(F("b="));
 	MSG_PRINT(bank);
+	if (ccN > 0) {
+		MSG_PRINT(F(" N="));
+		MSG_PRINT(ccN);
+	}
 	MSG_PRINT(F(" ccmode="));
 	MSG_PRINT(ccmode);
 	MSG_PRINT(F(" sync="));
@@ -1115,6 +1144,73 @@ void cmd_toggleBank()	// T<bank><sec>
 		unsuppCmd = true;
 	}
 	
+}
+
+void ccRegWrite()	// CW cc register write
+{
+	int16_t pos;
+	uint8_t val;
+	uint8_t reg;
+	uint8_t i;
+	uint8_t tmp_ccN = 0;
+	uint8_t tmp_ccmode = 0xFF;
+	bool flag = false;
+	
+	pos = 2;
+	for (i=0; i<64; i++)
+	{
+		if (!isHexadecimalDigit(cmdstring.charAt(pos)) || !isHexadecimalDigit(cmdstring.charAt(pos+1)) || !isHexadecimalDigit(cmdstring.charAt(pos+2)) || !isHexadecimalDigit(cmdstring.charAt(pos+3))) {
+			break;
+		}
+		reg = cmdstringPos2int(pos);
+		if (reg > 0x3F) {
+			break;
+		}
+		val = cmdstringPos2int(pos+2);
+		if (reg <= 0x28) {
+			cc1101::writeReg(reg,val);
+			reg += 2;
+		}
+		else if (reg == addr_ccmode) {
+			tmp_ccmode = val;
+		}
+		else if (reg == addr_ccN) {
+			tmp_ccN = val;
+		}
+		EEPROM.write(bankOffset + reg, val);
+		/*MSG_PRINT(F("reg="));
+		printHex2(reg);
+		MSG_PRINT(F(" val="));
+		printHex2(val);
+		MSG_PRINTLN("");*/
+		pos = cmdstring.indexOf(",",pos);
+		if (pos == -1) {
+			flag = true;
+			break;
+		}
+		pos++;
+	}
+	MSG_PRINT(cmdstring); // echo
+	if (flag) {
+		MSG_PRINT(F(" ok"));
+		if (tmp_ccN > 0) {
+			MSG_PRINT(F(",N="));
+			MSG_PRINT(tmp_ccN);
+			ccN = tmp_ccN;
+		}
+		if (tmp_ccmode != 0xFF) {
+			cc1101::setIdleMode();
+			cc1101::setReceiveMode();
+			MSG_PRINT(F(",ccmode="));
+			MSG_PRINT(tmp_ccmode);
+			ccmode = tmp_ccmode;
+			setCCmode();
+		}
+		MSG_PRINTLN("");
+	} else {
+		MSG_PRINT(F(" Error at pos="));
+		MSG_PRINTLN(pos);
+	}
 }
 
 void cmd_config()	// C read ccRegister
@@ -1225,8 +1321,9 @@ void cmd_ccFactoryReset()
          }
          cc1101::ccFactoryReset();
          cc1101::CCinit();
+         EEPROM.write(bankOffset + addr_ccN, 0);
          ccmode = 0;
-         EEPROM.write(bankOffset + CSetAddr[CSccmode], ccmode);
+         EEPROM.write(bankOffset + addr_ccmode, ccmode);
          setCCmode();
          if (bank > 0) {
             EEPROM.write(bankOffset, bank);
@@ -1369,7 +1466,7 @@ inline void configSET()
 			if (n < CSet16) {
 				val = cmdstring.substring(i+1).toInt();
 				MSG_PRINTLN(val);
-				if (n == CSccmode) {
+				if (n == CSccmode || n == CSccN) {
 					EEPROM.write(bankOffset + CSetAddr[n], val);
 				} else {
 					EEPROM.write(CSetAddr[n], val);
@@ -1403,14 +1500,17 @@ inline void configSET()
 	else if (n == 4) {			// maxnumpat
 		musterDec.cMaxNumPattern = val;
 	}
-	else if (n == 5) {			// ccmode
+	else if (n == 5) {			// ccN
+		ccN = val;
+	}
+	else if (n == 6) {			// ccmode
 		ccmode = val;
 		setCCmode();
 	}
-	else if (n == 6) {			// muthresh
+	else if (n == 7) {			// muthresh
 		musterDec.MuSplitThresh = val16;
 	}
-	else if (n == 7) {			// maxpulse
+	else if (n == 8) {			// maxpulse
 		if (val16 != 0) {
 			musterDec.cMaxPulse = -val16;
 		}
@@ -1615,10 +1715,11 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
       bank = 0;
     }
     bankOffset = getBankOffset(bank);
-    ccmode = EEPROM.read(bankOffset + CSetAddr[CSccmode]);
+    ccN = EEPROM.read(bankOffset + addr_ccN);
+    ccmode = EEPROM.read(bankOffset + addr_ccmode);
     if (ccmode == 255) {
        ccmode = 0;
-       EEPROM.write(bankOffset + CSetAddr[CSccmode], ccmode);
+       EEPROM.write(bankOffset + addr_ccmode, ccmode);
     }
     high = EEPROM.read(CSetAddr[CSet16]);
     musterDec.MuSplitThresh = EEPROM.read(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
