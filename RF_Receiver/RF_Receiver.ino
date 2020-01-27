@@ -53,7 +53,7 @@
 
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.4.0-dev200121"
+#define PROGVERS               "3.3.4.0-dev200126"
 #define VERSION_1               0x33
 #define VERSION_2               0x40
 
@@ -908,6 +908,7 @@ void send_ccFIFO()
 			MSG_PRINT(cmdstring); // echo
 			MSG_PRINT(F("Marcs="));
 			MSG_PRINTLN(cc1101::getMARCSTATE());
+			enableReceive();
 		}
 		else {
 			startdata = -1;
@@ -981,10 +982,7 @@ void cmd_help()
 
 void cmd_bank()
 {
-	if (cmdstring.charAt(1) == '?') {
-		print_Bank();
-	}
-	else if (isDigit(cmdstring.charAt(1))) {
+	if (isDigit(cmdstring.charAt(1))) {
 		uint8_t digit;
 		digit = (uint8_t)cmdstring.charAt(1);
 		bank = cc1101::hex2int(digit);
@@ -1012,6 +1010,9 @@ void cmd_bank()
 			MSG_PRINT(bank);
 			MSG_PRINTLN(F(" is not initialized"));
 		}
+	}
+	else if (cmdstring.charAt(0) == 'b' && (cmdstring.length() == 1 || cmdstring.charAt(1) == '?')) {
+		print_Bank();
 	}
 	else {
 		unsuppCmd = true;
