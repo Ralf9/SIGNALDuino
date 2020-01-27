@@ -97,7 +97,9 @@ namespace cc1101 {
 	#define EE_CC1101_PA         0x30  //  (EE_CC1101_CFG+EE_CC1101_CFG_SIZE)  // 2B
 	#define EE_CC1101_PA_SIZE    8
 	
-	#define PATABLE_DEFAULT      0x84   // 5 dB default value for factory reset
+	#define PATABLE_DEFAULT_433  0x84   // 5 dB default value for factory reset 433 MHz
+	#define PATABLE_DEFAULT_868  0x81   // 5 dB default value for factory reset 868 MHz
+	
 
 	//------------------------------------------------------------------------------
 	// Chip Status Byte
@@ -377,7 +379,11 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		}
 		for (uint8_t i = 0; i < 8; i++) {
 			if (i == 1) {
-				EEPROM.write(bankOffset + EE_CC1101_PA + i, PATABLE_DEFAULT);
+				if (bankOffset == 0) {	// Bank 0 normalerweise 433 Mhz
+					EEPROM.write(bankOffset + EE_CC1101_PA + i, PATABLE_DEFAULT_433);
+				} else {
+					EEPROM.write(bankOffset + EE_CC1101_PA + i, PATABLE_DEFAULT_868);
+				}
 			} else {
 				EEPROM.write(bankOffset + EE_CC1101_PA + i, 0);
 			}
@@ -474,6 +480,8 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		sendSPI(CC1101_TXFIFO | CC1101_WRITE_BURST);   // send register address
 		for (i = start; i < end; i+=2) {
 			val = cmdstringPos2int(i);
+			//printHex2(val);
+			//MSG_PRINT(F(" "));
 			sendSPI(val);		// send value
 		}
 		cc1101_Deselect();	//Wait for sending to finish (CC1101 will go to RX state automatically
@@ -486,6 +494,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		}
 		//MSG_PRINT(F("wtx="));
 		//MSG_PRINTLN(i);
+		//MSG_PRINTLN("");
 	}
 	
 	inline void setIdleMode()
