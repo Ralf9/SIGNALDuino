@@ -1,4 +1,4 @@
-# SIGNALDuino uC 3.3.4 (development version) with cc1101 xFSK and FIFO support
+# SIGNALDuino uC 4.0.x (development version) with Maple Mini, cc1101 xFSK and FIFO support
 
 ### Getting started
 
