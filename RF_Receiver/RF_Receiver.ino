@@ -53,7 +53,7 @@
 
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.4.0-dev200126"
+#define PROGVERS               "3.3.4.0-dev200130"
 #define VERSION_1               0x33
 #define VERSION_2               0x40
 
@@ -1312,6 +1312,7 @@ void cmd_configFactoryReset()	// eC - initEEPROMconfig
 {
          initEEPROMconfig();
          callGetFunctions();
+         cc1101::CCinit();
          setCCmode();
 }
 
@@ -1743,6 +1744,7 @@ void initEEPROMconfig(void)
 	for (uint8_t i = 0; i < CSetAnzEE; i++) {
 		EEPROM.write(CSetAddr[i], CSetDef[i]);
 	}
+	EEPROM.write(addr_bank, 0);
 	MSG_PRINTLN(F("Init eeprom to defaults"));
 }
 
