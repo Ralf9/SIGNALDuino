@@ -53,7 +53,7 @@
 
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.4.0-dev200130"
+#define PROGVERS               "3.3.4.0-dev200201"
 #define VERSION_1               0x33
 #define VERSION_2               0x40
 
@@ -96,15 +96,13 @@
 #include "FastDelegate.h"
 #include "output.h"
 #include "bitstore.h"
-#include "signalDecoder.h"
+#include "signalDecoder4.h"
 #include <TimerOne.h>  // Timer for LED Blinking
 
 #include "SimpleFIFO.h"
 SimpleFIFO<int,FIFO_LENGTH> FiFo; //store FIFO_LENGTH # ints
 SignalDetectorClass musterDec;
 
-
-#include <EEPROM.h>
 #include "cc1101.h"
 
 #define pulseMin  90
@@ -267,7 +265,6 @@ void storeFunctions(const int8_t ms=1, int8_t mu=1, int8_t mc=1, int8_t red=1, i
 void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl);
 void initEEPROM(void);
 void setCCmode();
-uint8_t cmdstringPos2int(uint8_t pos);
 void printHex2(const byte hex);
 uint8_t rssiCallback() { return 0; };	// Dummy return if no rssi value can be retrieved from receiver
 
@@ -793,9 +790,9 @@ void send_cmd()
 				for (uint8_t i=0;i<ccParamAnz;i++)
 				{
 					hex = (uint8_t)cmdstring.charAt(startdata + i*2);
-					val = cc1101::hex2int(hex) * 16;
+					val = tools::hex2int(hex) * 16;
 					hex = (uint8_t)cmdstring.charAt(startdata+1 + i*2);
-					val = cc1101::hex2int(hex) + val;
+					val = tools::hex2int(hex) + val;
 					cc1101::writeReg(0x0d + i, val);            // neue Registerwerte schreiben
   #ifdef DEBUGSENDCMD
 					printHex2(val);
@@ -844,7 +841,7 @@ void send_cmd()
 			MSG_PRINT(F("ccreg write back "));
 			for (uint8_t i=0;i<ccParamAnz;i++)
 			{
-				val = EEPROM.read(0x0f + i);
+				val = tools::EEbankRead(0x0f + i);
 				printHex2(val);
 				cc1101::writeReg(0x0d + i, val);    // gemerkte Registerwerte zurueckschreiben
 			}
@@ -957,7 +954,7 @@ void cmd_help_S()	// get help configvariables
 {
 	char buffer[12];
 	for (uint8_t i = 0; i < CSetAnz; i++) {
-	    strcpy_P(buffer, (char*)pgm_read_word(&(CSetCmd[i])));
+	    strcpy_P(buffer, (char*)pgm_read_ptr(&(CSetCmd[i])));
 	    MSG_PRINT(F("CS"));
 	    MSG_PRINT(buffer);
 	    MSG_PRINT(F("= "));
@@ -985,19 +982,21 @@ void cmd_bank()
 	if (isDigit(cmdstring.charAt(1))) {
 		uint8_t digit;
 		digit = (uint8_t)cmdstring.charAt(1);
-		bank = cc1101::hex2int(digit);
+		bank = tools::hex2int(digit);
 		bankOffset = getBankOffset(bank);
-		if (bank == 0 || cmdstring.charAt(0) == 'e' || (EEPROM.read(bankOffset) == bank && EEPROM.read(bankOffset + 1) == (255 - bank))) {
+		if (bank == 0 || cmdstring.charAt(0) == 'e' || (tools::EEbankRead(0) == bank && tools::EEbankRead(1) == (255 - bank))) {
 			if (cmdstring.charAt(2) == 'W') {
-				EEPROM.write(addr_bank, bank);
+				tools::EEwrite(addr_bank, bank);
+				tools::EEstore();
 				MSG_PRINT(F("write "));
 			}
 			MSG_PRINT(F("set "));
-			ccN = EEPROM.read(bankOffset + addr_ccN);
-			ccmode = EEPROM.read(bankOffset + addr_ccmode);
+			ccN = tools::EEbankRead(addr_ccN);
+			ccmode = tools::EEbankRead(addr_ccmode);
 			if (ccmode == 255) {
 				ccmode = 0;
-				EEPROM.write(bankOffset + addr_ccmode, ccmode);
+				tools::EEbankWrite(addr_ccmode, ccmode);
+				tools::EEstore();
 			}
 			if (cmdstring.charAt(0) != 'e') {
 				print_Bank();
@@ -1044,11 +1043,11 @@ void print_Bank()
 	MSG_PRINT(F(" ccmode="));
 	MSG_PRINT(ccmode);
 	MSG_PRINT(F(" sync="));
-	printHex2(EEPROM.read(bankOffset + 2 + CC1101_SYNC1));
-	printHex2(EEPROM.read(bankOffset + 2 + CC1101_SYNC0));
+	printHex2(tools::EEbankRead(2 + CC1101_SYNC1));
+	printHex2(tools::EEbankRead(2 + CC1101_SYNC0));
 	MSG_PRINT(F(" ccconf="));
 	for (uint8_t i = 0x0F; i <= 0x1F; i++) {
-		printHex2(EEPROM.read(bankOffset + i));
+		printHex2(tools::EEbankRead(i));
 	}
 	MSG_PRINT(F(" boffs="));
 	sprintf(hexString, "%04X", bankOffset);
@@ -1115,10 +1114,11 @@ void cmd_toggleBank()	// T<bank><sec>
 		for (uint8_t i = 0; i <= 9; i++) {
 			bankOffs = getBankOffset(i);
 			MSG_PRINT(F(" "));
-			sec = EEPROM.read(bankOffs + addr_togglesec);
+			sec = tools::EEbankRead(addr_togglesec);
 			if (sec > 99) {
 				sec = 0;
-				EEPROM.write(bankOffs + addr_togglesec, sec);
+				tools::EEbankWrite(addr_togglesec, sec);
+				tools::EEstore();
 			}
 			MSG_PRINT(sec * 10);
 		}
@@ -1129,15 +1129,16 @@ void cmd_toggleBank()	// T<bank><sec>
 		uint8_t digit;
 		
 		setBank = (uint8_t)cmdstring.charAt(1);
-		setBank = cc1101::hex2int(setBank);
+		setBank = tools::hex2int(setBank);
 		bankOffs = getBankOffset(setBank);
 		MSG_PRINT(F("setToggle b="));
 		MSG_PRINTLN(setBank);
 		digit = (uint8_t)cmdstring.charAt(2);
-		high = cc1101::hex2int(digit);
+		high = tools::hex2int(digit);
 		digit = (uint8_t)cmdstring.charAt(3);
-		sec = high * 10 + cc1101::hex2int(digit);
-		EEPROM.write(bankOffs + addr_togglesec, sec);
+		sec = high * 10 + tools::hex2int(digit);
+		tools::EEbankWrite(addr_togglesec, sec);
+		tools::EEstore();
 		MSG_PRINT(F(" sec="));
 		MSG_PRINTLN(sec * 10);
 	}
@@ -1163,11 +1164,11 @@ void ccRegWrite()	// CW cc register write
 		if (!isHexadecimalDigit(cmdstring.charAt(pos)) || !isHexadecimalDigit(cmdstring.charAt(pos+1)) || !isHexadecimalDigit(cmdstring.charAt(pos+2)) || !isHexadecimalDigit(cmdstring.charAt(pos+3))) {
 			break;
 		}
-		reg = cmdstringPos2int(pos);
+		reg = tools::cmdstringPos2int(pos);
 		if (reg > 0x3F) {
 			break;
 		}
-		val = cmdstringPos2int(pos+2);
+		val = tools::cmdstringPos2int(pos+2);
 		if (reg <= 0x28) {
 			cc1101::writeReg(reg,val);
 			reg += 2;
@@ -1178,7 +1179,7 @@ void ccRegWrite()	// CW cc register write
 		else if (reg == addr_ccN) {
 			tmp_ccN = val;
 		}
-		EEPROM.write(bankOffset + reg, val);
+		tools::EEbankWrite(reg, val);
 		/*MSG_PRINT(F("reg="));
 		printHex2(reg);
 		MSG_PRINT(F(" val="));
@@ -1191,6 +1192,7 @@ void ccRegWrite()	// CW cc register write
 		}
 		pos++;
 	}
+	tools::EEstore();
 	MSG_PRINT(cmdstring); // echo
 	if (flag) {
 		MSG_PRINT(F(" ok"));
@@ -1219,7 +1221,7 @@ void cmd_config()	// C read ccRegister
 	uint8_t reg;
 	
 	if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2))) {
-		reg = cmdstringPos2int(1);
+		reg = tools::cmdstringPos2int(1);
 		cc1101::readCCreg(reg);
 	}
 	else {
@@ -1235,9 +1237,10 @@ void cmd_writeEEPROM()	// write EEPROM und CC11001 register
     if (cmdstring.charAt(1) == 'S' && cmdstring.charAt(2) == '3' && hasCC1101) {       // WS<reg>  Command Strobes
         cc1101::commandStrobes();
     } else if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2)) && isHexadecimalDigit(cmdstring.charAt(3)) && isHexadecimalDigit(cmdstring.charAt(4))) {
-         reg = cmdstringPos2int(1);
-         val = cmdstringPos2int(3);
-         EEPROM.write(bankOffset + reg, val);
+         reg = tools::cmdstringPos2int(1);
+         val = tools::cmdstringPos2int(3);
+         tools::EEbankWrite(reg, val);
+         tools::EEstore();
          if (hasCC1101) {
            cc1101::writeCCreg(reg, val);
          }
@@ -1255,8 +1258,8 @@ void cmd_readEEPROM()	// R<adr>  read EEPROM
 		uint8_t low;
 		char hexString[6];
 		
-		high = cmdstringPos2int(2);
-		low = cmdstringPos2int(4);
+		high = tools::cmdstringPos2int(2);
+		low = tools::cmdstringPos2int(4);
 		addr = high * 256 + low;
 		
 		for (uint8_t j = 0; j < 4; j++) {
@@ -1266,7 +1269,7 @@ void cmd_readEEPROM()	// R<adr>  read EEPROM
 			MSG_PRINT(F(":"));
 			for (uint8_t i = 0; i < 16; i++) {
 				MSG_PRINT(F(" "));
-				printHex2(EEPROM.read(addr + i));
+				printHex2(tools::EEread(addr + i));
 			}
 			addr += 16;
 			MSG_PRINT(F("  "));
@@ -1275,18 +1278,18 @@ void cmd_readEEPROM()	// R<adr>  read EEPROM
 	}
    else if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2))) {             // r<adr>  read EEPROM
      uint8_t reg;
-     reg = cmdstringPos2int(1);
+     reg = tools::cmdstringPos2int(1);
      MSG_PRINT(F("EEPROM "));
      printHex2(reg);
      if (cmdstring.charAt(3) == 'n') {
          MSG_PRINT(F(" :"));
          for (uint8_t i = 0; i < 16; i++) {
              MSG_PRINT(F(" "));
-             printHex2(EEPROM.read(bankOffset + reg + i));
+             printHex2(tools::EEbankRead(reg + i));
          }
      } else {
         MSG_PRINT(F(" = "));
-        printHex2(EEPROM.read(bankOffset + reg));
+        printHex2(tools::EEbankRead(reg));
      }
      MSG_PRINTLN("");
   } else {
@@ -1298,7 +1301,7 @@ void cmd_writePatable()
 {
   uint8_t val;
   if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2))) {
-     val = cmdstringPos2int(1);
+     val = tools::cmdstringPos2int(1);
      cc1101::writeCCpatable(val);
      MSG_PRINT(F("Write "));
      printHex2(val);
@@ -1323,27 +1326,16 @@ void cmd_ccFactoryReset()
          }
          cc1101::ccFactoryReset();
          cc1101::CCinit();
-         EEPROM.write(bankOffset + addr_ccN, 0);
+         tools::EEbankWrite(addr_ccN, 0);
          ccmode = 0;
-         EEPROM.write(bankOffset + addr_ccmode, ccmode);
+         tools::EEbankWrite(addr_ccmode, ccmode);
          setCCmode();
          if (bank > 0) {
-            EEPROM.write(bankOffset, bank);
-            EEPROM.write(bankOffset + 1, (255 - bank));
+            tools::EEbankWrite(0, bank);
+            tools::EEbankWrite(1, (255 - bank));
          }
+         tools::EEstore();
          print_Bank();
-}
-
-
-uint8_t cmdstringPos2int(uint8_t pos) {
-  uint8_t val;
-  uint8_t hex;
-  
-       hex = (uint8_t)cmdstring.charAt(pos);
-       val = cc1101::hex2int(hex) * 16;
-       hex = (uint8_t)cmdstring.charAt(pos+1);
-       val = cc1101::hex2int(hex) + val;
-       return val;
 }
 
 inline void getConfig()
@@ -1461,7 +1453,7 @@ inline void configSET()
 		unsuppCmd = true;
 	}
 	while (n < CSetAnz) {
-		strcpy_P(buffer, (char*)pgm_read_word(&(CSetCmd[n])));
+		strcpy_P(buffer, (char*)pgm_read_ptr(&(CSetCmd[n])));
 		if (cmdstring.substring(2, i) == buffer) {
 			MSG_PRINT(buffer);
 			MSG_PRINT(F("="));
@@ -1469,19 +1461,20 @@ inline void configSET()
 				val = cmdstring.substring(i+1).toInt();
 				MSG_PRINTLN(val);
 				if (n == CSccmode || n == CSccN) {
-					EEPROM.write(bankOffset + CSetAddr[n], val);
+					tools::EEbankWrite(CSetAddr[n], val);
 				} else {
-					EEPROM.write(CSetAddr[n], val);
+					tools::EEwrite(CSetAddr[n], val);
 				}
 			}
 			else {
 				val16 = cmdstring.substring(i+1).toInt();
 				MSG_PRINTLN(val16);
 				val = (val16>>8) & 0xFF;
-				EEPROM.write(CSetAddr[n+(n-CSet16)], val);		// high
+				tools::EEwrite(CSetAddr[n+(n-CSet16)], val);		// high
 				val = val16 & 0xFF;
-				EEPROM.write(CSetAddr[n+(n-CSet16)+1], val);	// low
+				tools::EEwrite(CSetAddr[n+(n-CSet16)+1], val);	// low
 			}
+			tools::EEstore();
 			break;
 		}
 		n++;
@@ -1673,7 +1666,6 @@ void setCCmode() {
   }
 
 
-
 //================================= EEProm commands ======================================
 
 void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t deb, int8_t led, int8_t overfl, int8_t tgBank)
@@ -1686,7 +1678,8 @@ void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t de
 	overfl=overfl<<6;
 	tgBank=tgBank<<7;
 	int8_t dat =  ms | mu | mc | red | deb | led | overfl | tgBank;
-    EEPROM.write(addr_features,dat);
+	tools::EEwrite(addr_features,dat);
+	tools::EEstore();
 }
 
 void callGetFunctions(void)
@@ -1697,7 +1690,7 @@ void callGetFunctions(void)
 void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl, bool *tgBank)
 {
     int8_t high;
-    int8_t dat = EEPROM.read(addr_features);
+    int8_t dat = tools::EEread(addr_features);
 
     *ms=bool (dat &(1<<0));
     *mu=bool (dat &(1<<1));
@@ -1708,30 +1701,31 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     *overfl=bool (dat &(1<<6));
     *tgBank= bool (dat &(1<<7));
     
-    MdebFifoLimit = EEPROM.read(CSetAddr[0]);
-    musterDec.MsMoveCountmax = EEPROM.read(CSetAddr[2]);
-    musterDec.MuOverflMax = EEPROM.read(CSetAddr[3]);
-    musterDec.cMaxNumPattern = EEPROM.read(CSetAddr[4]);
-    bank = EEPROM.read(addr_bank);
+    MdebFifoLimit = tools::EEread(CSetAddr[0]);
+    musterDec.MsMoveCountmax = tools::EEread(CSetAddr[2]);
+    musterDec.MuOverflMax = tools::EEread(CSetAddr[3]);
+    musterDec.cMaxNumPattern = tools::EEread(CSetAddr[4]);
+    bank = tools::EEread(addr_bank);
     if (bank > 9) {
       bank = 0;
     }
     bankOffset = getBankOffset(bank);
-    ccN = EEPROM.read(bankOffset + addr_ccN);
-    ccmode = EEPROM.read(bankOffset + addr_ccmode);
+    ccN = tools::EEbankRead(addr_ccN);
+    ccmode = tools::EEbankRead(addr_ccmode);
     if (ccmode == 255) {
        ccmode = 0;
-       EEPROM.write(bankOffset + addr_ccmode, ccmode);
+       tools::EEbankWrite(addr_ccmode, ccmode);
+       tools::EEstore();
     }
-    high = EEPROM.read(CSetAddr[CSet16]);
-    musterDec.MuSplitThresh = EEPROM.read(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
-    high = EEPROM.read(CSetAddr[CSet16+2]);
-    musterDec.cMaxPulse = EEPROM.read(CSetAddr[CSet16+3]) + ((high << 8) & 0xFF00);
+    high = tools::EEread(CSetAddr[CSet16]);
+    musterDec.MuSplitThresh = tools::EEread(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
+    high = tools::EEread(CSetAddr[CSet16+2]);
+    musterDec.cMaxPulse = tools::EEread(CSetAddr[CSet16+3]) + ((high << 8) & 0xFF00);
     if (musterDec.cMaxPulse == 0) {
        musterDec.cMaxPulse = maxPulse;
     }
     musterDec.cMaxPulse = -musterDec.cMaxPulse;
-    musterDec.mcMinBitLen = EEPROM.read(CSetAddr[1]);
+    musterDec.mcMinBitLen = tools::EEread(CSetAddr[1]);
     if (musterDec.mcMinBitLen == 0) {
         musterDec.mcMinBitLen = mcMinBitLenDef;
     }
@@ -1739,18 +1733,19 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
 
 void initEEPROMconfig(void)
 {
-	EEPROM.write(addr_features, 0x3F);    	// Init EEPROM with all flags enabled, except MuNoOverflow and toggleBank
+	tools::EEwrite(addr_features, 0x3F);    	// Init EEPROM with all flags enabled, except MuNoOverflow and toggleBank
 	
 	for (uint8_t i = 0; i < CSetAnzEE; i++) {
-		EEPROM.write(CSetAddr[i], CSetDef[i]);
+		tools::EEwrite(CSetAddr[i], CSetDef[i]);
 	}
-	EEPROM.write(addr_bank, 0);
+	tools::EEwrite(addr_bank, 0);
+	tools::EEstore();
 	MSG_PRINTLN(F("Init eeprom to defaults"));
 }
 
 void initEEPROM(void)
 {
-  if (EEPROM.read(EE_MAGIC_OFFSET) == VERSION_1 && EEPROM.read(EE_MAGIC_OFFSET+1) == VERSION_2) {
+  if (tools::EEread(EE_MAGIC_OFFSET) == VERSION_1 && tools::EEread(EE_MAGIC_OFFSET+1) == VERSION_2) {
     
   //if (musterDec.MdebEnabled) {
     #ifdef DEBUG
@@ -1762,12 +1757,13 @@ void initEEPROM(void)
     initEEPROMconfig();
     //storeFunctions(1, 1, 1);    // Init EEPROM with all flags enabled
     #ifdef CMP_CC1101
-       if (EEPROM.read(EE_MAGIC_OFFSET) != VERSION_1) {  // ccFactoryReset nur wenn VERSION_1 nicht passt
+       if (tools::EEread(EE_MAGIC_OFFSET) != VERSION_1) {  // ccFactoryReset nur wenn VERSION_1 nicht passt
           cc1101::ccFactoryReset();
        }
     #endif
-    EEPROM.write(EE_MAGIC_OFFSET, VERSION_1);
-    EEPROM.write(EE_MAGIC_OFFSET+1, VERSION_2);
+    tools::EEwrite(EE_MAGIC_OFFSET, VERSION_1);
+    tools::EEwrite(EE_MAGIC_OFFSET+1, VERSION_2);
+    tools::EEstore();
   }
   callGetFunctions();
 }
