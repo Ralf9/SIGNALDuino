@@ -87,7 +87,7 @@
 
 //#define WATCHDOG	1 // Der Watchdog ist in der Entwicklungs und Testphase deaktiviert. Es muss auch ohne Watchdog stabil funktionieren.
 //#define DEBUGSENDCMD  1
-//#define SENDTODECODER 1 // damit wird in der send_raw Routine anstatt zu senden, die Pulse direkt dem Decoder uebergeben
+//(#define SENDTODECODER 1) ist neu ccmode=15 -> damit wird in der send_raw Routine anstatt zu senden, die Pulse direkt dem Decoder uebergeben
 #define DEBUG                  1
 
 #ifdef WATCHDOG
@@ -106,8 +106,8 @@ SignalDetectorClass musterDec;
 #include "cc1101.h"
 
 #define pulseMin  90
-#define maxCmdString 350  //350 // 250
-#define maxSendPattern 8
+#define maxCmdString 450  //350 // 250
+#define maxSendPattern 10
 #define mcMinBitLenDef   17
 #define ccMaxBuf 50
 
@@ -351,12 +351,10 @@ void setup() {
   if (hasCC1101) {
 	if (ccmode > 0 || cc1101::regCheck()) {
 #endif
-#ifndef SENDTODECODER
 		enableReceive();
-		if (musterDec.MdebEnabled) {
+		if (musterDec.MdebEnabled && RXenabled == true && ccmode < 15) {
 			MSG_PRINTLN(F("receiver enabled"));
 		}
-#endif
 #ifdef CMP_CC1101
 	}
 	else {
@@ -442,7 +440,7 @@ void loop() {
 		musterDec.printMsgSuccess = false;
 	}
   }
-  else {
+  else if (ccmode < 15) {
 	uint8_t fifoBytes;
 	bool dup;		// true bei identischen Wiederholungen bei readRXFIFO
 
@@ -537,7 +535,7 @@ void enableReceive() {
      attachInterrupt(digitalPinToInterrupt(PIN_RECEIVE), handleInterrupt, CHANGE);
    }
    #ifdef CMP_CC1101
-   if (hasCC1101) {
+   if (hasCC1101 && ccmode < 15) {
      cc1101::setIdleMode();
      cc1101::setReceiveMode();
    }
@@ -575,6 +573,7 @@ void send_raw(const uint8_t startpos,const uint16_t endpos,const int16_t *bucket
 	bool isLow;
 	int16_t dur;
 
+  if (ccmode == 0) {
 	for (uint16_t i=startpos;i<=endpos;i++ )
 	{
 		//MSG_PRINT(cmdstring.substring(i,i+1));
@@ -582,28 +581,30 @@ void send_raw(const uint8_t startpos,const uint16_t endpos,const int16_t *bucket
 		//MSG_PRINT(index);
 		isLow=buckets[index] >> 15;
 		dur = abs(buckets[index]); 		//isLow ? dur = abs(buckets[index]) : dur = abs(buckets[index]);
-#ifndef SENDTODECODER
 		while (stoptime > micros()){
 			;
 		}
 		isLow ? digitalLow(PIN_SEND): digitalHigh(PIN_SEND);
 		stoptime+=dur;
-#else
-		if (isLow) dur = -dur;
-		musterDec.decode(&dur);
-#endif
 	}
-#ifndef SENDTODECODER
 	while (stoptime > micros()){
 		;
 	}
-#endif
+  } else {	// Send to Decoder
+	for (uint16_t i=startpos;i<=endpos;i++ )
+	{
+		//MSG_PRINT(cmdstring.substring(i,i+1));
+		index = source->charAt(i) - '0';
+		//MSG_PRINT(index);
+		isLow=buckets[index] >> 15;
+		dur = abs(buckets[index]); 
+		if (isLow) dur = -dur;
+		musterDec.decode(&dur);
+	}
+  }
 	//MSG_PRINTLN("");
-
 }
 //SM;R=2;C=400;D=AFAFAF;
-
-
 
 
 void send_mc(const uint8_t startpos,const uint8_t endpos, const int16_t clock)
@@ -783,8 +784,7 @@ void send_cmd()
 #ifdef DEBUGSENDCMD
 			MSG_PRINT("F=");
 #endif
-#ifndef SENDTODECODER
-			if (ccParamAnz > 0 && ccParamAnz <= 5 && hasCC1101) {
+			if (ccParamAnz > 0 && ccParamAnz <= 5 && hasCC1101 && ccmode == 0) {
 				uint8_t hex;
 				//MSG_PRINTLN("write new ccreg  ");
 				for (uint8_t i=0;i<ccParamAnz;i++)
@@ -799,7 +799,6 @@ void send_cmd()
   #endif
 				}
 			}
-#endif
 #ifdef DEBUGSENDCMD
 			MSG_PRINTLN("");
 #endif
@@ -811,11 +810,9 @@ void send_cmd()
 		MSG_PRINT(F("send failed!"));
 	} else
 	{
-#ifndef SENDTODECODER
 		#ifdef CMP_CC1101
-		if (hasCC1101) cc1101::setTransmitMode();	
+		if (hasCC1101 && ccmode == 0) cc1101::setTransmitMode();	
 		#endif
-#endif
 		for (uint8_t i=0;i<repeats;i++)
 		{
 			for (uint8_t c=0;c<=cmdNo;c++)
@@ -835,7 +832,7 @@ void send_cmd()
 			//if (extraDelay) delay(1);
 		}
 
-#ifndef SENDTODECODER
+	  if (ccmode == 0) {	//normal send
 		MSG_PRINT(cmdstring); // echo
 		if (ccParamAnz > 0) {
 			MSG_PRINT(F("ccreg write back "));
@@ -847,12 +844,16 @@ void send_cmd()
 			}
 			//MSG_PRINTLN("");
 		}
-#endif
+	  }
+	  else {
+		int16_t dur = -32001;
+		musterDec.decode(&dur);
+	  }
 	}
-#ifndef SENDTODECODER
+//#ifndef SENDTODECODER
 	enableReceive();	// enable the receiver
 	MSG_PRINTLN("");
-#endif
+//#endif
 }
 
 
@@ -1065,9 +1066,6 @@ void cmd_Version()	// V: Version
 	    MSG_PRINT(F("Mhz) "));
 #endif
 	}
-#ifdef SENDTODECODER
-	MSG_PRINT(F("(no receive, only send to decoder) "));
-#endif
 	MSG_PRINT(F("(b"));
 	if (toggleBankEnabled == false) {
 		MSG_PRINT(bank);
@@ -1202,8 +1200,8 @@ void ccRegWrite()	// CW cc register write
 			ccN = tmp_ccN;
 		}
 		if (tmp_ccmode != 0xFF) {
-			cc1101::setIdleMode();
-			cc1101::setReceiveMode();
+			//cc1101::setIdleMode();
+			//cc1101::setReceiveMode();
 			MSG_PRINT(F(",ccmode="));
 			MSG_PRINT(tmp_ccmode);
 			ccmode = tmp_ccmode;
@@ -1340,7 +1338,7 @@ void cmd_ccFactoryReset()
 
 inline void getConfig()
 {
-  if (ccmode == 0) {
+  if (ccmode == 0 || ccmode == 15) {
    MSG_PRINT(F("MS="));
    MSG_PRINT(musterDec.MSenabled,DEC);
    MSG_PRINT(F(";MU="));
@@ -1363,7 +1361,7 @@ inline void getConfig()
    if (toggleBankEnabled == true) {
       MSG_PRINT(F(";toggleBank=1"));
    }
-  if (ccmode == 0) {
+  if (ccmode == 0 || ccmode == 15) {
    if (musterDec.MuNoOverflow == true) {
       MSG_PRINT(F(";MuNoOverflow=1"));
    }
@@ -1635,13 +1633,11 @@ inline void changeReceiver() {
 	RXenabled = false;
 	MSG_PRINTLN("RX=0");
   }
-  if (cmdstring.charAt(1) == 'E')
+  if (cmdstring.charAt(1) == 'E' && ccmode < 15)
   {
-#ifndef SENDTODECODER
 	RXenabled = true;
   	enableReceive();
 	MSG_PRINTLN("RX=1");
-#endif
   }
 }
 
