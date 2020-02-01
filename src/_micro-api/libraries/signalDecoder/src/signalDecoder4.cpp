@@ -28,7 +28,7 @@
 *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 */
-#include "signalDecoder.h"
+#include "signalDecoder4.h"
 
 #ifdef DEBUGGLEICH
 //Helper function to check buffer for bad data
