@@ -8,8 +8,8 @@
 #else
 	//#include "WProgram.h"
 #endif
-#include <EEPROM.h>
 #include "output.h"
+#include "tools.h"
 
 
 extern uint16_t bankOffset;
@@ -169,36 +169,13 @@ namespace cc1101 {
 		0x41, // 27 RCCTRL1
 		0x00, // 28 RCCTRL0
 	};
-  
-	byte hex2int(byte hex) {    // convert a hexdigit to int    // Todo: printf oder scanf nutzen
-		if (hex >= '0' && hex <= '9') hex = hex - '0';
-		else if (hex >= 'a' && hex <= 'f') hex = hex - 'a' + 10;
-		else if (hex >= 'A' && hex <= 'F') hex = hex - 'A' + 10;
-		return hex;
-		// printf ("%d\n",$hex) ??
-	}
-	
-	uint8_t cmdstringPos2int(uint8_t pos) {
-		uint8_t val;
-		uint8_t hex;
-
-		hex = (uint8_t)cmdstring.charAt(pos);
-		val = hex2int(hex) * 16;
-		hex = (uint8_t)cmdstring.charAt(pos+1);
-		val = hex2int(hex) + val;
-		return val;
-	}
 
 	void printHex2(const byte hex) {   // Todo: printf oder scanf nutzen
 		if (hex < 16) {
 			MSG_PRINT("0");
 		}
-		// char hexstr[2] = {0};
-		//sprintf(hexstr, "%02X", hex);
-
 		MSG_PRINT(hex, HEX);
 	}
-
 
 	uint8_t sendSPI(const uint8_t val) {					     // send byte via SPI
 		SPDR = val;                                      // transfer byte via SPI
@@ -257,7 +234,7 @@ namespace cc1101 {
 		waitV_Miso();                                    // wait until MISO goes low
 		sendSPI(CC1101_PATABLE | CC1101_WRITE_BURST);   // send register address
 		for (uint8_t i = 0; i < 8; i++) {
-			sendSPI(EEPROM.read(bankOffset + EE_CC1101_PA+i));                     // send value
+			sendSPI(tools::EEbankRead(EE_CC1101_PA+i));                     // send value
 		}
 			cc1101_Deselect();
 	}
@@ -270,7 +247,7 @@ namespace cc1101 {
 
        if (cmdstring.charAt(3) == 'n' && isHexadecimalDigit(cmdstring.charAt(4))) {   // C<reg>n<anz>  gibt anz+2 fortlaufende register zurueck
            hex = (uint8_t)cmdstring.charAt(4);
-           n = hex2int(hex);
+           n = tools::hex2int(hex);
            if (reg < 0x2F) {
               MSG_PRINT("C");
               printHex2(reg);
@@ -330,7 +307,7 @@ namespace cc1101 {
   
     if (isHexadecimalDigit(cmdstring.charAt(3))) {
         hex = (uint8_t)cmdstring.charAt(3);
-        reg = hex2int(hex) + 0x30;
+        reg = tools::hex2int(hex) + 0x30;
         if (reg < 0x3e) {
              val = cmdStrobe(reg);
              delay(1);
@@ -364,9 +341,9 @@ namespace cc1101 {
 void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa ramping)
 	for (uint8_t i = 0; i < 8; i++) {
 		if (i == 1) {
-			EEPROM.write(bankOffset + EE_CC1101_PA + i, var);
+			tools::EEbankWrite(EE_CC1101_PA + i, var);
 		} else {
-			EEPROM.write(bankOffset + EE_CC1101_PA + i, 0);
+			tools::EEbankWrite(EE_CC1101_PA + i, 0);
 		}
 	}
 	writePatable();
@@ -375,17 +352,17 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 
 	void ccFactoryReset() {
 		for (uint8_t i = 0; i<sizeof(initVal); i++) {
-        		EEPROM.write(bankOffset + EE_CC1101_CFG + i, pgm_read_byte(&initVal[i]));
+        	tools::EEbankWrite(EE_CC1101_CFG + i, pgm_read_byte(&initVal[i]));
 		}
 		for (uint8_t i = 0; i < 8; i++) {
 			if (i == 1) {
 				if (bankOffset == 0) {	// Bank 0 normalerweise 433 Mhz
-					EEPROM.write(bankOffset + EE_CC1101_PA + i, PATABLE_DEFAULT_433);
+					tools::EEbankWrite(EE_CC1101_PA + i, PATABLE_DEFAULT_433);
 				} else {
-					EEPROM.write(bankOffset + EE_CC1101_PA + i, PATABLE_DEFAULT_868);
+					tools::EEbankWrite(EE_CC1101_PA + i, PATABLE_DEFAULT_868);
 				}
 			} else {
-				EEPROM.write(bankOffset + EE_CC1101_PA + i, 0);
+				tools::EEbankWrite(EE_CC1101_PA + i, 0);
 			}
 		}
 		MSG_PRINTLN(F("ccFactoryReset done"));  
@@ -479,7 +456,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		waitV_Miso();                                    // wait until MISO goes low
 		sendSPI(CC1101_TXFIFO | CC1101_WRITE_BURST);   // send register address
 		for (i = start; i < end; i+=2) {
-			val = cmdstringPos2int(i);
+			val = tools::cmdstringPos2int(i);
 			//printHex2(val);
 			//MSG_PRINT(F(" "));
 			sendSPI(val);		// send value
@@ -551,7 +528,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		
 		sendSPI(CC1101_WRITE_BURST);
 		for (uint8_t i = 0; i<sizeof(initVal); i++) {              // write EEPROM value to cc1101
-			sendSPI(EEPROM.read(bankOffset + EE_CC1101_CFG + i));
+			sendSPI(tools::EEbankRead(EE_CC1101_CFG + i));
 		}
 		cc1101_Deselect();
 		delayMicroseconds(10);            // ### todo: welcher Wert ist als delay sinnvoll? ###
