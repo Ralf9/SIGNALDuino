@@ -21,7 +21,7 @@
 
 #include "Arduino.h"
 
-template<uint8_t bufSize>
+template<uint16_t bufSize>	// bufSize in Byte
 class BitStore
 {
 public:
@@ -37,11 +37,11 @@ public:
 	//unsigned char *datastore;  // Reserve 40 Bytes for our store. Should be edited to aa dynamic way
 	unsigned char datastore[bufSize];
 	void reset();
-	bool getByte(const uint8_t idx, uint8_t *retvalue);
-	uint8_t bytecount;  // Number of stored bytes
+	bool getByte(const uint16_t idx, uint8_t *retvalue);
+	uint16_t bytecount;  // Number of stored bytes
 	uint16_t valcount;  // Number of total values stored
 	//uint8_t debug;
-	uint8_t bcnt;   // fuer debugzwecke nach public verschoben
+	uint16_t bcnt;   // fuer debugzwecke nach public verschoben
 
 	uint8_t operator[](const uint16_t pos) {
 		getValue(pos);
@@ -62,7 +62,7 @@ private:
 	uint8_t valuelen;   // Number of bits for every value
 	uint8_t bmask;
 	//uint8_t bcnt;
-	const uint8_t buffsize;
+	const uint16_t buffsize;
 	uint8_t _rval;
 };
 
@@ -85,7 +85,7 @@ private:
 *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-template<uint8_t bufSize>
+template<uint16_t bufSize>
 BitStore<bufSize>::BitStore(uint8_t bitlength) :buffsize(bufSize)
 {
 	valuelen = bitlength; // How many bits shoudl be reserved for one value added ?
@@ -110,7 +110,7 @@ BitStore<bufSize>::~BitStore()
 //free(datastore);
 }
 */
-template<uint8_t bufSize>
+template<uint16_t bufSize>
 bool BitStore<bufSize>::addValue(uint8_t value)
 {
 	if (bcnt == 7 && valcount > 0)
@@ -151,11 +151,11 @@ bool BitStore<bufSize>::addValue(uint8_t value)
 }
 
 
-template<uint8_t bufSize>
+template<uint16_t bufSize>
 bool BitStore<bufSize>::changeValue(const uint16_t pos, uint8_t value)
 {
 
-	uint8_t bytepos = pos*valuelen / 8;
+	uint16_t bytepos = pos*valuelen / 8;
 	/*
 	Serial.print("Changing value:");   Serial.print(value, DEC);
 	Serial.print(" (");   Serial.print(value, BIN); Serial.print(")@valpos:");
@@ -188,18 +188,18 @@ bool BitStore<bufSize>::changeValue(const uint16_t pos, uint8_t value)
 * (returns the variable valcount. This represents the number of values )
 */
 
-template<uint8_t bufSize>
+template<uint16_t bufSize>
 const uint16_t BitStore<bufSize>::getSize()
 {
 	return valcount;
 }
 
-template<uint8_t bufSize>
+template<uint16_t bufSize>
 bool BitStore<bufSize>::moveLeft(const uint16_t begin)
 {
 	if (begin == 0 || begin > valcount) return false;
 
-	uint8_t startbyte = begin / 2;
+	uint16_t startbyte = begin / 2;
 	/*
 	Serial.print("moveleft startbyte:"); Serial.print(startbyte, DEC); Serial.print("@valpos");  Serial.print(begin, DEC);
 	Serial.print(" bytecount:"); Serial.print(bytecount, DEC);
@@ -215,8 +215,8 @@ bool BitStore<bufSize>::moveLeft(const uint16_t begin)
 		//Serial.print(" sleft ");   Serial.print(shift_left, DEC);  Serial.print(" sright"); Serial.print(shift_right, DEC);
 
 		//valcount = valcount - (shift_left / 4);
-		uint8_t i = startbyte;
-		uint8_t z = 0;
+		uint16_t i = startbyte;
+		uint16_t z = 0;
 		for (; i < bytecount; ++i, ++z)
 		{
 			/*
@@ -261,10 +261,10 @@ bool BitStore<bufSize>::moveLeft(const uint16_t begin)
 
 }
 
-template<uint8_t bufSize>
+template<uint16_t bufSize>
 uint8_t BitStore<bufSize>::getValue(const uint16_t pos)
 {
-	uint8_t bytepos = pos*valuelen / 8;
+	uint16_t bytepos = pos*valuelen / 8;
 	if ((bytepos) >= buffsize ) return -1; // Out of Buffer
 											  //Serial.print("getValue Pos:");   Serial.print(pos, DEC);
 
@@ -287,15 +287,15 @@ uint8_t BitStore<bufSize>::getValue(const uint16_t pos)
 	return _rval;
 }
 
-template<uint8_t bufSize>
-bool BitStore<bufSize>::getByte(const uint8_t idx,uint8_t *retvalue)
+template<uint16_t bufSize>
+bool BitStore<bufSize>::getByte(const uint16_t idx,uint8_t *retvalue)
 {
 	if (idx >= buffsize ) return false; // Out of buffer range
 	*retvalue =datastore[idx];
 	return true;
 }
 
-template<uint8_t bufSize>
+template<uint16_t bufSize>
 void BitStore<bufSize>::reset()
 {
 	/*for (uint8_t i = 0; i < bytecount; i++)

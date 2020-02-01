@@ -83,7 +83,7 @@ public:
 																	   };
 
 	void reset();
-	bool decode(const int* pulse);
+	bool decode(const int16_t* pulse);
 	const status getState();
 	typedef fastdelegate::FastDelegate0<uint8_t> FuncRetuint8t;
 	void setRSSICallback(FuncRetuint8t callbackfunction) { _rssiCallback = callbackfunction; }
@@ -109,18 +109,18 @@ public:
 	bool NoMsgEnd;
 	bool printMsgSuccess;
 	
-	uint8_t histo[maxNumPattern];
+	uint16_t histo[maxNumPattern];
 	//uint8_t message[maxMsgSize];
 	BitStore<maxMsgSize/2> message;       // A store using 4 bit for every value stored. 
 
 #ifdef DEBUGGLEICH
 	uint8_t bMoveFlag;   // nur zu debugzwecke
 #endif
-	int firstLast;
-	int lastPulse;
-	uint8_t messageLen;					  // Todo, kann durch message.valcount ersetzt werden
+	int16_t firstLast;
+	int16_t lastPulse;
+	uint16_t messageLen;					  // Todo, kann durch message.valcount ersetzt werden
 	uint8_t mstart;						  // Holds starting point for message
-	uint8_t mend;						  // Holds end point for message if detected
+	uint16_t mend;						  // Holds end point for message if detected
 	bool success;                         // True if a valid coding was found
 	bool m_truncated;					// Identify if message has been truncated
 	bool m_overflow;
@@ -129,11 +129,11 @@ public:
 	uint16_t tol;                           // calculated tolerance for signal
 
 	status state;                           // holds the status of the detector
-	int buffer[2];                          // Internal buffer to store two pules length
-	int* first;                             // Pointer to first buffer entry
-	int* last;                              // Pointer to last buffer entry 
+	int16_t buffer[2];                          // Internal buffer to store two pules length
+	int16_t* first;                             // Pointer to first buffer entry
+	int16_t* last;                              // Pointer to last buffer entry 
 	float tolFact;                          //
-	int pattern[maxNumPattern];				// 1d array to store the pattern
+	int16_t pattern[maxNumPattern];				// 1d array to store the pattern
 	uint8_t patternLen;                     // counter for length of pattern
 	uint8_t pattern_pos;
 	int8_t sync;							// index to sync in pattern if it exists
@@ -151,16 +151,16 @@ public:
 	void doDetect();
 	void processMessage(const uint8_t p_valid);
 	bool compress_pattern();
-	void calcHisto(const uint8_t startpos = 0, uint8_t endpos = 0);
+	void calcHisto(const uint8_t startpos = 0, uint16_t endpos = 0);
 	bool getClock(); // Searches a clock in a given signal
 	bool getSync();	 // Searches clock and sync in given Signal
-	int8_t printMsgRaw(uint8_t m_start, const uint8_t m_end, const String *preamble = NULL, const String *postamble = NULL);
+	//int8_t printMsgRaw(uint8_t m_start, const uint_t m_end, const String *preamble = NULL, const String *postamble = NULL);
 	void printMsgStr(const String *first, const String *second, const String *third);
-	const bool inTol(const int val, const int set, const int tolerance); // checks if a value is in tolerance range
+	const bool inTol(const int16_t val, const int16_t set, const int16_t tolerance); // checks if a value is in tolerance range
 
 	void printOut();
 
-	int8_t findpatt(const int val);              // Finds a pattern in our pattern store. returns -1 if te pattern is not found
+	int8_t findpatt(const int16_t val);              // Finds a pattern in our pattern store. returns -1 if te pattern is not found
 
 	bool checkMBuffer();
 	bool isMuMessageRepeat();
@@ -193,7 +193,7 @@ public:
 	int8_t longhigh;
 	int8_t shortlow;
 	int8_t shorthigh;
-	int clock; // Manchester calculated clock		
+	int16_t clock; // Manchester calculated clock		
 	int8_t minbitlen;
 	uint8_t mc_sync_pos;
 	

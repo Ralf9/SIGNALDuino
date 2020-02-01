@@ -38,7 +38,7 @@
 || #
 ||
 */
-template<typename T, int rawSize>
+template<typename T, int16_t rawSize>
 class SimpleFIFO {
 public:
 	const SIMPLEFIFO_SIZE_TYPE size;				//speculative feature, in case it's needed
@@ -67,11 +67,11 @@ private:
 #endif
 };
 
-template<typename T, int rawSize>
+template<typename T, int16_t rawSize>
 SimpleFIFO<T,rawSize>::SimpleFIFO() : size(rawSize) {
 	flush();
 }
-template<typename T, int rawSize>
+template<typename T, int16_t rawSize>
 bool SimpleFIFO<T,rawSize>::enqueue( T element ) {
 	if ( count() >= rawSize ) { return false; }
 	numberOfElements++;
@@ -80,17 +80,17 @@ bool SimpleFIFO<T,rawSize>::enqueue( T element ) {
 	nextIn++; //advance to next index
 	return true;
 }
-template<typename T, int rawSize>
+template<typename T, int16_t rawSize>
 T SimpleFIFO<T,rawSize>::dequeue() {
 	numberOfElements--;
 	nextOut %= size;
 	return raw[ nextOut++];
 }
-template<typename T, int rawSize>
+template<typename T, int16_t rawSize>
 T SimpleFIFO<T,rawSize>::peek() const {
 	return raw[ nextOut % size];
 }
-template<typename T, int rawSize>
+template<typename T, int16_t rawSize>
 void SimpleFIFO<T,rawSize>::flush() {
 	nextIn = nextOut = numberOfElements = 0;
 }

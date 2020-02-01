@@ -1,8 +1,9 @@
 /*
-*   Pattern Decoder Library V3
+*   Pattern Decoder Library V4
 *   Library to decode radio signals based on patternd detection
 *   2014-2015  N.Butzek, S.Butzek
 *   2015-2017  S.Butzek
+*   2020 Ralf9
 
 *   This library contains classes to perform decoding of digital signals
 *   typical for home automation. The focus for the moment is on different sensors
@@ -237,7 +238,7 @@ inline void SignalDetectorClass::doDetect()
 
 				}
 				if (messageLen > 0 && histo[pattern_pos] > 0) {
-					for (uint8_t i = messageLen; i > 0; --i)
+					for (uint16_t i = messageLen; i > 0; --i)
 					{
 						if (message[i-1] == pattern_pos) // Finde den letzten Verweis im Array auf den Index der gleich ueberschrieben wird
 						{
@@ -297,7 +298,7 @@ inline void SignalDetectorClass::doDetect()
 
 }
 
-bool SignalDetectorClass::decode(const int * pulse)
+bool SignalDetectorClass::decode(const int16_t * pulse)
 {
 	success = false;
 	if (messageLen > 0) {
@@ -340,9 +341,9 @@ bool SignalDetectorClass::compress_pattern()
 				DBG_PRINT(" idx2= "); DBG_PRINT(idx2); DBG_PRINT("/"); DBG_PRINT(pattern[idx2]);
 				DBG_PRINT(" tol="); DBG_PRINT(tol);
 #endif
-				uint8_t change_count = 0;
+				uint16_t change_count = 0;
 				// Change val -> ref_val in message array
-				for (uint8_t i = 0; i<messageLen && change_count < histo[idx2]; i++)
+				for (uint16_t i = 0; i<messageLen && change_count < histo[idx2]; i++)
 				{
 					if (message[i] == idx2)
 					{
@@ -586,7 +587,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 						MSG_WRITE(n);
  						mstart += 2;
 					}
-					for (uint8_t i = mstart; i <= mend; i=i+2) {					
+					for (uint16_t i = mstart; i <= mend; i=i+2) {					
 						message.getByte(i/2,&n);
 						MSG_WRITE(n);
 					}
@@ -607,7 +608,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					}
 					MSG_PRINT("D=");
 
-					for (uint8_t i = mstart; i <= mend; ++i)
+					for (uint16_t i = mstart; i <= mend; ++i)
 					{
 						MSG_PRINT(message[i]);
 					}
@@ -751,7 +752,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 
 
 					//mend = min(mend, messageLen); // Workaround if mend=255
-					for (uint8_t i = 0; i < messageLen; ++i)
+					for (uint16_t i = 0; i < messageLen; ++i)
 					{
 						if (i == mstart || i == mend) {
 							MSG_PRINT("_");
@@ -968,7 +969,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 						MSG_PRINT("D");
 					}
 
-					for (uint8_t i = 0; i < mend; i=i+2) {
+					for (uint16_t i = 0; i < mend; i=i+2) {
 						message.getByte(i/2,&n);
 						MSG_WRITE(n);
 					}
@@ -991,7 +992,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					
 					MSG_PRINT("D=");
 				    }
-					for (uint8_t i = 0; i < mend; ++i)
+					for (uint16_t i = 0; i < mend; ++i)
 					{
 						MSG_PRINT(message[i],HEX);
 					}
@@ -1161,7 +1162,7 @@ void SignalDetectorClass::printOut()
 	DBG_PRINT(F(", state: ")); DBG_PRINT(state);
 
 	DBG_PRINTLN(); DBG_PRINT(F("Signal: "));
-	uint8_t idx;
+	uint16_t idx;
 	for (idx = 0; idx < messageLen; ++idx) {
 		DBG_PRINT((int8_t)message[idx],DEC);
 		//DBG_PRINT(message.getValue(idx));
@@ -1211,7 +1212,7 @@ bool SignalDecoderClass::validSequence(const int * a, const int * b)
 }
 */
 
-void SignalDetectorClass::calcHisto(const uint8_t startpos, uint8_t endpos)
+void SignalDetectorClass::calcHisto(const uint8_t startpos, uint16_t endpos)
 {
 	if (messageLen == 0) return;
 	for (uint8_t i = 0; i<cMaxNumPattern; ++i)
@@ -1221,7 +1222,7 @@ void SignalDetectorClass::calcHisto(const uint8_t startpos, uint8_t endpos)
 
 	if (endpos == 0) endpos = messageLen-1;
 	uint8_t bstartpos = startpos/2;       // *4/8;
-	uint8_t bendpos = endpos/2;           // *4/8;
+	uint16_t bendpos = endpos/2;           // *4/8;
 	uint8_t bval;
 	if (startpos % 2 == 1)  // ungerade
 	{
@@ -1229,7 +1230,7 @@ void SignalDetectorClass::calcHisto(const uint8_t startpos, uint8_t endpos)
 		histo[bval & B00001111]++;
 		bstartpos++;
 	}
-	for (uint8_t i = bstartpos; i <= bendpos; ++i)
+	for (uint16_t i = bstartpos; i <= bendpos; ++i)
 	{
 		message.getByte(i,&bval);
 		histo[bval >> 4]++;
@@ -1424,31 +1425,6 @@ void SignalDetectorClass::printMsgStr(const String * first, const String * secon
 	MSG_PRINT(*third);
 
 }
-
-int8_t SignalDetectorClass::printMsgRaw(uint8_t m_start, const uint8_t m_end, const String * preamble, const String * postamble)
-{
-	MSG_PRINT(*preamble);
-	//String msg;
-	//msg.reserve(m_end-mstart);
-	byte crcv = 0x00;
-	for (; m_start <= m_end; m_start++)
-	{
-		//msg + =message[m_start];
-		//MSG_PRINT((100*message[m_start])+(10*message[m_start])+message[m_start]);
-		MSG_PRINT(message[m_start]);
-#ifndef ARDUSIM
-		//crcv = _crc_ibutton_update(crcv, message[m_start]);
-#endif
-	}
-	//MSG_PRINT(msg);
-	MSG_PRINT(*postamble);
-	return crcv;
-	//printMsgStr(preamble,&msg,postamble);}
-}
-
-
-
-
 
 
 /*
@@ -1657,7 +1633,7 @@ unsigned char ManchesterpatternDecoder::getMCByte(const uint8_t idx) {
 
 const bool ManchesterpatternDecoder::doDecode() {
 
-	uint8_t i = 1;
+	uint16_t i = 1;
 	pdec->m_truncated = false;
 	pdec->mstart = 0; // Todo: pruefen ob start aus isManchester uebernommen werden kann
 #ifdef DEBUGDECODE
@@ -1741,7 +1717,7 @@ const bool ManchesterpatternDecoder::doDecode() {
 		// Decoding
 		while (i < pdec->messageLen)
 		{
-			const uint8_t mpi = pdec->message[i]; // Store pattern for further processing
+			const uint16_t mpi = pdec->message[i]; // Store pattern for further processing
 			
 			if (isLong(mpi))
 			{
@@ -1944,11 +1920,11 @@ const bool ManchesterpatternDecoder::isManchester()
 #endif
 	if (pdec->patternLen < 4)	return false;
 
-	int tstclock = -1;
+	int16_t tstclock = -1;
 
 	uint8_t pos_cnt = 0;
 	uint8_t neg_cnt = 0;
-	int equal_cnt = 0;
+	int16_t equal_cnt = 0;
 	const uint8_t minHistocnt = round(pdec->messageLen*0.04);
 				                          //     3     1    0     2
 	uint8_t sortedPattern[pdec->cMaxNumPattern]; // 1300,-1300,-734,..800
@@ -1999,14 +1975,14 @@ const bool ManchesterpatternDecoder::isManchester()
 		tstclock = -1;
 		equal_cnt = 0;
 
-		const int clockpulse = pdec->pattern[sortedPattern[i]]; // double clock!
+		const int16_t clockpulse = pdec->pattern[sortedPattern[i]]; // double clock!
 		for (uint8_t x = 0; x < p; x++)
 		{
 #if MCDEBUGDETECT >= 1
 			DBG_PRINT(sortedPattern[x]); 
 #endif
 
-			const int aktpulse = pdec->pattern[sortedPattern[x]];
+			const int16_t aktpulse = pdec->pattern[sortedPattern[x]];
 			bool pshort = false;
 			bool plong = false;
 
@@ -2057,10 +2033,10 @@ const bool ManchesterpatternDecoder::isManchester()
 				int8_t sequence_even[4] = { -1,-1,-1,-1 };				
 				int8_t sequence_odd[4] = { -1,-1,-1,-1 };
 
-				int z = 0;
+				int16_t z = 0;
 				while (z < pdec->messageLen)
 				{
-					const uint8_t mpz = pdec->message[z]; // Store pattern for further processing
+					const uint16_t mpz = pdec->message[z]; // Store pattern for further processing
 
 					if (((isLong(mpz) == false) && (isShort(mpz) == false)) || (z == (pdec->messageLen-1)))
 					{  
