@@ -33,22 +33,34 @@
 
 // Config flags for compiling correct options / boards Define only one
 
+#define MAPLE_SDUINO 1
+//#define MAPLE_CUL 1
 //#define ARDUINO_ATMEGA328P_MINICUL 1
-//#define ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101 1
-#define OTHER_BOARD_WITH_CC1101  1
+//(#define ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101 1) wird nicht mehr unterstuetzt, da der verfuegbare freie flash zu klein ist
+//#define OTHER_BOARD_WITH_CC1101  1
+
+//#define LAN_WIZ 1
 
 //#define CMP_MEMDBG 1
 
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten 
 
 #ifdef OTHER_BOARD_WITH_CC1101
-	#define CMP_CC1101     
+	#define CMP_CC1101
 #endif
 #ifdef ARDUINO_ATMEGA328P_MINICUL
-	#define CMP_CC1101     
+	#define CMP_CC1101
 #endif
 #ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
-	#define CMP_CC1101     
+	#define CMP_CC1101
+#endif
+#ifdef MAPLE_SDUINO
+	#define MAPLE_Mini
+	#define CMP_CC1101
+#endif
+#ifdef MAPLE_CUL
+	#define MAPLE_Mini
+	#define CMP_CC1101
 #endif
 
 
@@ -70,6 +82,11 @@
 		#define PIN_SEND              2   // gdo0Pin TX out
 		#define PIN_RECEIVE           3
 		#define PIN_MARK433	      A0
+	#elif MAPLE_SDUINO
+		#define PIN_LED              33
+		#define PIN_SEND             10   // gdo0 Pin TX out
+	    #define PIN_RECEIVE          11
+		#define PIN_WIZ_RST          27
 	#else 
 		#define PIN_LED               9
 		#define PIN_SEND              3   // gdo0Pin TX out
@@ -82,8 +99,13 @@
 #endif
 
 
-#define BAUDRATE               57600
-#define FIFO_LENGTH            140 // 50
+#ifdef MAPLE_Mini
+	#define BAUDRATE               115200
+	#define FIFO_LENGTH            150
+#else
+	#define BAUDRATE               57600
+	#define FIFO_LENGTH            140 // 50
+#endif
 
 //#define WATCHDOG	1 // Der Watchdog ist in der Entwicklungs und Testphase deaktiviert. Es muss auch ohne Watchdog stabil funktionieren.
 //#define DEBUGSENDCMD  1
@@ -97,16 +119,41 @@
 #include "output.h"
 #include "bitstore.h"
 #include "signalDecoder4.h"
-#include <TimerOne.h>  // Timer for LED Blinking
+#ifdef MAPLE_Mini
+  #include <malloc.h>
+  extern char _estack;
+  extern char _Min_Stack_Size;
+  static char *ramend = &_estack;
+  static char *minSP = (char*)(ramend - &_Min_Stack_Size);
+  extern "C" char *sbrk(int i);
+#else
+  #include <TimerOne.h>  // Timer for LED Blinking
+#endif
+  
+#ifdef LAN_WIZ
+  #include <SPI.h>
+  #include <Ethernet.h>
+  
+  byte mac[] = { 0xDE, 0xAE, 0xBE, 0xEF, 0xF9, 0xE9 };
+  byte ip[] = { 192, 168, 0, 85 };
+  byte gateway[] = { 192, 168, 0, 191 };
+  byte subnet[] = { 255, 255, 255, 0 };
 
-#include "SimpleFIFO.h"
+  EthernetServer server = EthernetServer(23);
+#endif
+
+  #include "SimpleFIFO.h"
 SimpleFIFO<int,FIFO_LENGTH> FiFo; //store FIFO_LENGTH # ints
 SignalDetectorClass musterDec;
 
 #include "cc1101.h"
 
 #define pulseMin  90
-#define maxCmdString 450  //350 // 250
+#ifdef MAPLE_Mini
+  #define maxCmdString 600
+#else
+  #define maxCmdString 350
+#endif
 #define maxSendPattern 10
 #define mcMinBitLenDef   17
 #define ccMaxBuf 50
@@ -270,6 +317,14 @@ uint8_t rssiCallback() { return 0; };	// Dummy return if no rssi value can be re
 
 
 void setup() {
+#ifdef LAN_WIZ
+	pinAsOutput(PIN_WIZ_RST);
+	digitalWrite(PIN_WIZ_RST, LOW);		// RESET should be heldlowat least 500 us for W5500
+	delayMicroseconds(500);
+	digitalWrite(PIN_WIZ_RST, HIGH);
+	Ethernet.begin(mac, ip, gateway, subnet);
+	server.begin();		// start listening for clients
+#endif
 	uint8_t ccVersion;
 	Serial.begin(BAUDRATE);
 	while (!Serial) {
@@ -342,9 +397,19 @@ void setup() {
 	}
 	delay(50);
 
+#ifdef MAPLE_Mini
+	TIM_TypeDef *Instance = TIM1;
+	HardwareTimer *MyTim = new HardwareTimer(Instance);
+	MyTim->setMode(2, TIMER_OUTPUT_COMPARE);
+	MyTim->setOverflow(31*1000, MICROSEC_FORMAT);
+	MyTim->attachInterrupt(cronjob);
+	MyTim->resume();
+	
+	
+#else
 	Timer1.initialize(31*1000); //Interrupt wird jede 31 Millisekunden ausgeloest
 	Timer1.attachInterrupt(cronjob);
-
+#endif
 	cmdstring.reserve(maxCmdString);
 
 #ifdef CMP_CC1101
@@ -364,7 +429,11 @@ void setup() {
 #endif
 }
 
+#ifdef MAPLE_Mini
+void cronjob(HardwareTimer*) {
+#else
 void cronjob() {
+#endif
 	static uint16_t cnt0 = 0;
 	static uint8_t cnt1 = 0;
 	 const unsigned long  duration = micros() - lastTime;
@@ -377,8 +446,6 @@ void cronjob() {
 		 FiFo.enqueue(sDuration);
 
 		 lastTime = micros();
-	
-
 	 }
 	if (cnt0++ == 0) {
 		if (cnt1++ == 0) {
@@ -387,16 +454,18 @@ void cronjob() {
 	}
 	 digitalWrite(PIN_LED, blinkLED);
 	 blinkLED = false;
-
 }
 
 
 void loop() {
-	static int aktVal=0;
+	static int16_t aktVal=0;
 	bool state;
 	uint8_t fifoCount;
 	
-#ifdef __AVR_ATmega32U4__	
+#ifdef __AVR_ATmega32U4__
+	serialEvent();
+#endif
+#ifdef MAPLE_Mini
 	serialEvent();
 #endif
 	if (command_available) {
@@ -505,15 +574,19 @@ void loop() {
 
 //========================= Pulseauswertung ================================================
 void handleInterrupt() {
+#ifdef MAPLE_Mini
+  noInterrupts();
+#else
   cli();
+#endif
   const unsigned long Time=micros();
   //const bool state = digitalRead(PIN_RECEIVE);
   const unsigned long  duration = Time - lastTime;
   lastTime = Time;
   if (duration >= pulseMin) {//kleinste zulaessige Pulslaenge
-	int sDuration;
+	int16_t sDuration;
     if (duration < maxPulse) {//groesste zulaessige Pulslaenge, max = 32000
-      sDuration = int(duration); //das wirft bereits hier unnoetige Nullen raus und vergroessert den Wertebereich
+      sDuration = int16_t(duration); //das wirft bereits hier unnoetige Nullen raus und vergroessert den Wertebereich
     }else {
       sDuration = maxPulse; // Maximalwert set to maxPulse defined in lib.
     }
@@ -523,10 +596,13 @@ void handleInterrupt() {
 	//MSG_PRINTLN(sDuration);
     FiFo.enqueue(sDuration);
 
-
     //++fifocnt;
   } // else => trash
+#ifdef MAPLE_Mini
+  interrupts();
+#else
   sei();
+#endif
 }
 
 void enableReceive() {
@@ -1078,7 +1154,14 @@ void cmd_Version()	// V: Version
 
 void cmd_freeRam()	// R: FreeMemory
 {
+#ifdef MAPLE_Mini
+	char *heapend = (char*)sbrk(0);
+	char * stack_ptr = (char*)__get_MSP();
+	struct mallinfo mi = mallinfo();
+	MSG_PRINTLN(((stack_ptr < minSP) ? stack_ptr : minSP) - heapend + mi.fordblks);
+#else
 	MSG_PRINTLN(freeRam());
+#endif
 }
 
 void cmd_send()
