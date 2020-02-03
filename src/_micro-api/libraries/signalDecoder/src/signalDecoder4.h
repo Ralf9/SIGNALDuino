@@ -1,5 +1,5 @@
 /*
-*   Pattern Decoder Library V3
+*   Pattern Decoder Library V4
 *   Library to decode radio signals based on patternd detection
 *   2014-2015  N.Butzek, S.Butzek
 *   2015-2017  S.Butzek
@@ -45,7 +45,7 @@
 #include "FastDelegate.h"
 
 #define maxNumPattern 16
-#define maxMsgSize 254
+#define maxMsgSize 2000
 #define minMessageLen 40
 #define syncMinFact 6
 #define syncMaxFact 45 // 39

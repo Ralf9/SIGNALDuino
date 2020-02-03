@@ -333,7 +333,7 @@ bool SignalDetectorClass::compress_pattern()
 		{
 			if (histo[idx2] == 0 || (pattern[idx] ^ pattern[idx2]) >> 15)
 				continue;
-			const int16_t tol = int(((abs(pattern[idx2])*tolFact) + (abs(pattern[idx])*tolFact)) / 2);
+			const int16_t tol = int16_t(((abs(pattern[idx2])*tolFact) + (abs(pattern[idx])*tolFact)) / 2);
 			if (inTol(pattern[idx2], pattern[idx], tol))  // Pattern are very equal, so we can combine them
 			{
 #if DEBUGDoDETECT >3
@@ -361,7 +361,7 @@ bool SignalDetectorClass::compress_pattern()
 #endif // DEBUGDETECT
 
 
-				int  sum = histo[idx] + histo[idx2];
+				int16_t  sum = histo[idx] + histo[idx2];
 				//int lPatternIdx = pattern[idx];
 				pattern[idx] = ((long(pattern[idx]) * histo[idx]) + (long(pattern[idx2]) * histo[idx2])) / sum;
 				//if (abs(pattern[idx]) < 90) {
@@ -1124,7 +1124,7 @@ const status SignalDetectorClass::getState()
 }
 
 
-const bool SignalDetectorClass::inTol(const int val, const int set, const int tolerance)
+const bool SignalDetectorClass::inTol(const int16_t val, const int16_t set, const int16_t tolerance)
 {
 	
 	// tolerance = tolerance == 0 ? tol : tolerance;
@@ -1187,7 +1187,7 @@ void SignalDetectorClass::printOut()
 	
 }
 
-int8_t SignalDetectorClass::findpatt(const int val)
+int8_t SignalDetectorClass::findpatt(const int16_t val)
 {
 	//seq[0] = Laenge  //seq[1] = 1. Eintrag //seq[2] = 2. Eintrag ...
 	// Iterate over patterns (1 dimension of array)
@@ -1792,6 +1792,7 @@ const bool ManchesterpatternDecoder::doDecode() {
 			}
 		}
 	}
+	return false;
 }
 /*
 #ifdef DEBUGDECODE
