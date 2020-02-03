@@ -3,14 +3,17 @@
 #ifndef _CC1101_h
 #define _CC1101_h
 
-#if defined(ARDUINO) && ARDUINO >= 100
+//#ifdef defined(ARDUINO) && ARDUINO >= 100
 	#include "Arduino.h"
-#else
+//#else
 	//#include "WProgram.h"
-#endif
+//#endif
 #include "output.h"
 #include "tools.h"
 
+#ifdef MAPLE_Mini
+	#include <SPI.h>
+#endif
 
 extern uint16_t bankOffset;
 extern String cmdstring;
@@ -19,21 +22,25 @@ extern uint8_t ccBuf[50];
 
 namespace cc1101 {
 	
-	/*
-	#ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
-	#define SS					  8  
-	#define PIN_MARK433			  4  // LOW -> 433Mhz | HIGH -> 868Mhz
-	
-	#elif ARDUINO_ATMEGA328P_MINICUL  // 8Mhz 
-	#define PIN_MARK433			  0
-	#endif
-	*/
-	
-#define csPin	SS	   // CSN  out
+#ifdef MAPLE_SDUINO
+	#define csPin	31
+	#define mosiPin 28   // MOSI out
+	#define misoPin 29   // MISO in
+	#define sckPin  30   // SCLK out
+	SPIClass SPI_2(mosiPin, misoPin, sckPin);
+#elif MAPLE_CUL
+	#define csPin	7
+	#define mosiPin 4   // MOSI out
+	#define misoPin 5   // MISO in
+	#define sckPin  6   // SCLK out
+	SPIClass SPI_2(mosiPin, misoPin, sckPin);
+#else
+	#define csPin	SS	   // CSN  out
 	#define mosiPin MOSI   // MOSI out
 	#define misoPin MISO   // MISO in
 	#define sckPin  SCK    // SCLK out	
-
+#endif
+	
 	
 	#define CC1101_CONFIG      0x80
 	#define CC1101_STATUS      0xC0
@@ -87,8 +94,13 @@ namespace cc1101 {
 	#define CC1101_SFTX     0x3B  // Flush the TX FIFO buffer.
 	#define CC1101_SNOP      0x3D  // No operation. May be used to get access to the chip status byte.
 
+/*#ifdef MAPLE_Mini
+	#define wait_Miso() delayMicroseconds(10)
+	#define waitV_Miso() delayMicroseconds(10)
+#else*/
 	#define wait_Miso()       while(isHigh(misoPin) ) //{ static uint8_t miso_count=255;delay(1); if(miso_count==0) return 255; miso_count--; }      // wait until SPI MISO line goes low 
 	#define waitV_Miso()      while(isHigh(misoPin) ) //{ static uint8_t miso_count=255;delay(1); if(miso_count==0) return; miso_count--; }      // wait until SPI MISO line goes low 
+//#endif
 	#define cc1101_Select()   digitalLow(csPin)          // select (SPI) CC1101
 	#define cc1101_Deselect() digitalHigh(csPin) 
 	
@@ -178,9 +190,13 @@ namespace cc1101 {
 	}
 
 	uint8_t sendSPI(const uint8_t val) {					     // send byte via SPI
+#ifdef MAPLE_Mini
+		return SPI_2.transfer(val);
+#else
 		SPDR = val;                                      // transfer byte via SPI
 		while (!(SPSR & _BV(SPIF)));                     // wait until SPI operation is terminated
 		return SPDR;
+#endif
 	}
 
 	uint8_t cmdStrobe(const uint8_t cmd) {                  // send command strobe to the CC1101 IC via SPI
@@ -346,6 +362,9 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 			tools::EEbankWrite(EE_CC1101_PA + i, 0);
 		}
 	}
+	#ifdef MAPLE_Mini
+	tools::EEstore();
+	#endif
 	writePatable();
 }
 
@@ -365,6 +384,9 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 				tools::EEbankWrite(EE_CC1101_PA + i, 0);
 			}
 		}
+		#ifdef MAPLE_Mini
+		tools::EEstore();
+		#endif
 		MSG_PRINTLN(F("ccFactoryReset done"));  
 	}
 
@@ -382,16 +404,22 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 	
 	inline void setup()
 	{
+	#ifdef MAPLE_Mini
+		// Setup SPI 2
+		SPI_2.begin();	//Initialize the SPI_2 port.
+		SPI_2.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+	#else
 		pinAsOutput(sckPin);
 		pinAsOutput(mosiPin);
 		pinAsInput(misoPin);
+		PCR = _BV(SPE) | _BV(MSTR);               // SPI speed = CLK/4
+	#endif
 		pinAsOutput(csPin);                    // set pins for SPI communication
 		
 		#ifdef PIN_MARK433
 		pinAsInputPullUp(PIN_MARK433);
 		#endif
 		
-		SPCR = _BV(SPE) | _BV(MSTR);               // SPI speed = CLK/4
 		/*
 		SPCR = ((1 << SPE) |               		// SPI Enable
 		(0 << SPIE) |              		// SPI Interupt Enable
@@ -405,8 +433,12 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		*/
 		pinAsInput(PIN_SEND);        // gdo0Pi, sicherheitshalber bis zum CC1101 init erstmal input   
 		digitalHigh(csPin);                 // SPI init
+	#ifndef MAPLE_Mini
 		digitalHigh(sckPin);
 		digitalLow(mosiPin);
+	#else
+		tools::EEbufferFill();
+	#endif
 	}
 
 	uint8_t getRSSI()
