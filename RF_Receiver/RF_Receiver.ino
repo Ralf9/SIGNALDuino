@@ -35,11 +35,11 @@
 
 #define MAPLE_SDUINO 1
 //#define MAPLE_CUL 1
+#define LAN_WIZ 1
+
 //#define ARDUINO_ATMEGA328P_MINICUL 1
 //(#define ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101 1) wird nicht mehr unterstuetzt, da der verfuegbare freie flash zu klein ist
 //#define OTHER_BOARD_WITH_CC1101  1
-
-//#define LAN_WIZ 1
 
 //#define CMP_MEMDBG 1
 
@@ -65,7 +65,7 @@
 
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.4.0-dev200201"
+#define PROGVERS               "3.3.4.0-dev200204"
 #define VERSION_1               0x33
 #define VERSION_2               0x40
 
@@ -140,6 +140,7 @@
   byte subnet[] = { 255, 255, 255, 0 };
 
   EthernetServer server = EthernetServer(23);
+  EthernetClient client;
 #endif
 
   #include "SimpleFIFO.h"
@@ -327,12 +328,19 @@ void setup() {
 #endif
 	uint8_t ccVersion;
 	Serial.begin(BAUDRATE);
-	while (!Serial) {
-		; // wait for serial port to connect. Needed for native USB
-	}
-	//if (musterDec.MdebEnabled) {
-	DBG_PRINTLN(F("Using sFIFO"));
+	//while (!Serial) {
+	//	; // wait for serial port to connect. Needed for native USB
 	//}
+	for (uint8_t sw=0;sw<255;sw++ ) {
+		delay(10);
+		if (Serial) {
+			break;
+		}
+	}
+	
+	if (musterDec.MdebEnabled) {
+		DBG_PRINTLN(F("Using sFIFO"));
+	}
 #ifdef WATCHDOG
 	if (MCUSR & (1 << WDRF)) {
 		MSG_PRINTLN(F("Watchdog caused a reset"));
@@ -467,6 +475,9 @@ void loop() {
 #endif
 #ifdef MAPLE_Mini
 	serialEvent();
+#endif
+#ifdef LAN_WIZ
+	ethernetLoop();
 #endif
 	if (command_available) {
 		command_available=false;
@@ -1596,6 +1607,20 @@ inline void configSET()
 	}
 	else {
 		unsuppCmd = true;
+	}
+}
+
+void ethernetLoop()
+{
+	//check if there are any new clients
+	if (server.available()) {
+		if (!client || !client.connected()) {
+			if (client) client.stop();
+			client = server.available();
+			MSG_PRINT(F("New client:"));
+			MSG_PRINTLN(client.remoteIP());
+			return;
+		}
 	}
 }
 

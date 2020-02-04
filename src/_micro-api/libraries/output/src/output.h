@@ -51,23 +51,23 @@
 //	#include "WProgram.h"
 #endif
 
-#ifdef ETHERNET_PRINT
-#include <wificlient.h>
+#ifdef LAN_WIZ
+  #include <SPI.h>
+  #include <Ethernet.h>
 
-extern WiFiClient serverClient;
+  extern EthernetClient client;
 
-
-#define MSG_PRINTER serverClient // Not Implemented at this time
+#define MSG_PRINTER client
 #else
 #define MSG_PRINTER Serial
 #endif
 
-#ifdef ETHERNET_DEBUG
-#define DBG_PRINTER Client // Not Implemented at this time
+#ifdef LAN_WIZ
+//#ifdef ETHERNET_DEBUG
+#define DBG_PRINTER client
 #else
 #define DBG_PRINTER Serial
 #endif
-
 
 #define MSG_PRINT(...) { MSG_PRINTER.print(__VA_ARGS__); }
 #define MSG_PRINTLN(...) { MSG_PRINTER.println(__VA_ARGS__); }
@@ -80,7 +80,5 @@ extern WiFiClient serverClient;
 	#define DBG_PRINT(...) 
 	#define DBG_PRINTLN(...) 
 #endif
-
-
 
 #endif
