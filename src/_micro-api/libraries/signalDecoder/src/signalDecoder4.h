@@ -3,6 +3,7 @@
 *   Library to decode radio signals based on patternd detection
 *   2014-2015  N.Butzek, S.Butzek
 *   2015-2017  S.Butzek
+*   2020 Ralf9
 
 *   This library contains different classes to perform detecting of digital signals
 *   typical for home automation. The focus for the moment is on different sensors
@@ -40,13 +41,14 @@
 #define CMP_CC1101
 #define DEBUG 1
 
-#define LAN_WIZ 1	// die Ausgabe ueber Ethernet funktioniert nur, wenn dies hier nochmals definiert wird
+//#define LAN_WIZ 1	// die Ausgabe ueber Ethernet funktioniert nur, wenn dies hier nochmals definiert wird
 #include "output.h"
 #include "bitstore.h"
 #include "FastDelegate.h"
 
 #define maxNumPattern 16
-#define maxMsgSize 2000
+#define defMaxMsgSize 1500 //2000
+#define defMsMaxMsgSize 254
 #define minMessageLen 40
 #define syncMinFact 6
 #define syncMaxFact 45 // 39
@@ -78,9 +80,8 @@ class SignalDetectorClass
 public:
 	SignalDetectorClass() : first(buffer), last(NULL), message(4) { 
 																		 buffer[0] = 0; reset(); mcMinBitLen = 17; 	
-																		 MsMoveCount = 0; 
+																		 MsMoveCount = 0;
 																		 MuMoveCount = 0;
-																		 MuOverflCount = 0;
 																	   };
 
 	void reset();
@@ -95,25 +96,26 @@ public:
 	bool MUenabled;
 	bool MCenabled;
 	bool MSenabled;
+	bool MSeqEnabled;
 	bool MredEnabled;                       // 1 = compress printMsgRaw
-	bool MuNoOverflow;
+	//bool MuNoOverflow;
 	bool MdebEnabled;                       // 1 = print message debug info  enabled
 	//bool MfiltEnabled;        // fuer Nachrichten Filter reserviert
 	uint8_t MsMoveCountmax;
 	uint8_t MsMoveCount;
 	uint8_t MuMoveCount;
-	uint8_t MuOverflCount;
-	uint8_t MuOverflMax;
-	uint8_t cMaxNumPattern;
+	uint16_t maxMuPrint;
+	uint16_t maxMsgSize;
 	uint16_t MuSplitThresh;
+	uint8_t cMaxNumPattern;
 	int16_t cMaxPulse;
-	bool NoMsgEnd;
 	bool printMsgSuccess;
 	
 	uint16_t histo[maxNumPattern];
-	//uint8_t message[maxMsgSize];
-	BitStore<maxMsgSize/2> message;       // A store using 4 bit for every value stored. 
-
+	//uint8_t message[defMaxMsgSize];
+	BitStore<defMaxMsgSize/2> message;       // A store using 4 bit for every value stored. 
+	
+	char buf[350] = {};
 #ifdef DEBUGGLEICH
 	uint8_t bMoveFlag;   // nur zu debugzwecke
 #endif
@@ -125,7 +127,7 @@ public:
 	bool success;                         // True if a valid coding was found
 	bool m_truncated;					// Identify if message has been truncated
 	bool m_overflow;
-	void bufferMove(const uint8_t start);
+	void bufferMove(const uint16_t start);
 
 	uint16_t tol;                           // calculated tolerance for signal
 
@@ -135,7 +137,9 @@ public:
 	int16_t* last;                              // Pointer to last buffer entry 
 	float tolFact;                          //
 	int16_t pattern[maxNumPattern];				// 1d array to store the pattern
+	int16_t ms0pattern[10];
 	uint8_t patternLen;                     // counter for length of pattern
+	uint8_t msPatternLen;
 	uint8_t pattern_pos;
 	int8_t sync;							// index to sync in pattern if it exists
 	bool mcDetected;						// MC Signal alread detected flag
@@ -143,6 +147,10 @@ public:
 	bool mcRepeat;				// ist true wenn evtl noch eine Wiederholung folgen kann
 	uint8_t mcMinBitLen;					// min bit Length
 	uint8_t rssiValue;						// Holds the RSSI value retrieved via a rssi callback
+	uint8_t idxDat;
+	uint8_t msEqCnt;
+	bool MsEqSkip;
+	
 	FuncRetuint8t _rssiCallback=NULL;			// Holds the pointer to a callback Function
 
 	void addData(const uint8_t value);
@@ -176,12 +184,8 @@ public:
 	const bool doDecode();
 	void setMinBitLen(const uint8_t len);
 	void getMessageHexStr(String *message);
-	void getMessagePulseStr(String *str);
-	void getMessageClockStr(String* str);
-	void getMessageLenStr(String* str);
-
 	void printMessageHexStr();
-	void printMessagePulseStr();
+	void printBufMessageHexStr();
 
 	const bool isManchester();
 	void reset();
