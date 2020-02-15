@@ -1,5 +1,5 @@
 /*
-*   RF_RECEIVER v3.32 for Arduino
+*   RF_RECEIVER v4.xx for Arduino
 *   Sketch to use an arduino as a receiver/sending device for digital signals
 *
 *   The Sketch can also encode and send data via a transmitter,
@@ -35,10 +35,9 @@
 
 #define MAPLE_SDUINO 1
 //#define MAPLE_CUL 1
-#define LAN_WIZ 1
+//#define LAN_WIZ 1	// bitte auch das "#define LAN_WIZ 1" in der SignalDecoder.h beachten 
 
 //#define ARDUINO_ATMEGA328P_MINICUL 1
-//(#define ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101 1) wird nicht mehr unterstuetzt, da der verfuegbare freie flash zu klein ist
 //#define OTHER_BOARD_WITH_CC1101  1
 
 //#define CMP_MEMDBG 1
@@ -65,27 +64,25 @@
 
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.4.0-dev200204"
-#define VERSION_1               0x33
-#define VERSION_2               0x40
+#define PROGVERS               "4.0.1-dev200215"
+#define VERSION_1               0x40
+#define VERSION_2               0x1d
 
 #ifdef CMP_CC1101
-	#ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
-		#define PIN_LED               13
-		#define PIN_SEND              9   // gdo0Pin TX out
-		#define PIN_RECEIVE				   7
-		#define digitalPinToInterrupt(p) ((p) == 0 ? 2 : ((p) == 1 ? 3 : ((p) == 2 ? 1 : ((p) == 3 ? 0 : ((p) == 7 ? 4 : NOT_AN_INTERRUPT)))))
-		#define PIN_MARK433			  4
-		#define SS					  8  
-	#elif ARDUINO_ATMEGA328P_MINICUL  // 8Mhz 
+	#ifdef ARDUINO_ATMEGA328P_MINICUL  // 8Mhz 
 		#define PIN_LED               4
 		#define PIN_SEND              2   // gdo0Pin TX out
 		#define PIN_RECEIVE           3
 		#define PIN_MARK433	      A0
 	#elif MAPLE_SDUINO
 		#define PIN_LED              33
-		#define PIN_SEND             10   // gdo0 Pin TX out
-	    #define PIN_RECEIVE          11
+		#define PIN_SEND             17   // gdo0 Pin TX out
+	    #define PIN_RECEIVE          18   // gdo2
+		#define PIN_WIZ_RST          27
+	#elif MAPLE_CUL
+		#define PIN_LED              33
+		#define PIN_SEND             17   // gdo0 Pin TX out
+	    #define PIN_RECEIVE          18
 		#define PIN_WIZ_RST          27
 	#else 
 		#define PIN_LED               9
@@ -101,7 +98,7 @@
 
 #ifdef MAPLE_Mini
 	#define BAUDRATE               115200
-	#define FIFO_LENGTH            150
+	#define FIFO_LENGTH            170
 #else
 	#define BAUDRATE               57600
 	#define FIFO_LENGTH            140 // 50
@@ -158,6 +155,7 @@ SignalDetectorClass musterDec;
 #define maxSendPattern 10
 #define mcMinBitLenDef   17
 #define ccMaxBuf 50
+#define defMaxMsgSize 1500	// selber Wert wie in signalDecoder4.h
 
 // EEProm Address
 #define EE_MAGIC_OFFSET      0
@@ -236,27 +234,28 @@ void (*cmdFP[])(void) = {
 		changeReceiver	// XQ
 		};
 
-#define CSetAnz 9
-#define CSetAnzEE 11
-#define CSet16 7
-#define CSccN 5
-#define CSccmode 6
+#define CSetAnz 10
+#define CSetAnzEE 12
+#define CSet16 8
+#define CSccN 6
+#define CSccmode 7
 
-//const char *CSetCmd[] = {"fifolimit", "mcmbl", "mscnt", "muoverflmax", "maxnumpat", "ccN",    "ccmode", "muthresh", "L",  "maxpulse", "L"  };
-const uint8_t CSetAddr[] = {  0xf0,     0xf1,    0xf2,    0xf3,          0xf4,     addr_ccN, addr_ccmode,       0xf5,  0xf6, 0xf7,      0xf8 };
-const uint8_t CSetDef[] =  {    120,       0,       4,       3,             8,            0,           0,          0,     0,    0,         0 };
+//const char *CSetCmd[] = {"fifolimit", "mcmbl", "mscnt", "maxMuPrintx256", "maxMsgSizex256", "maxnumpat", "ccN",    "ccmode", "muthresh", "L",  "maxpulse", "L"  };
+const uint8_t CSetAddr[] = {  0xf0,     0xf1,     0xf2,          0xf3,           0xf4,            0xf5,   addr_ccN, addr_ccmode,     0xf8,  0xf9,  0xfa,     0xfb };
+const uint8_t CSetDef[] =  {    120,       0,        4,             3,              4,               8,          0,           0,        0,     0,     0,        0 };
 
 const char string_0[] PROGMEM = "fifolimit";
 const char string_1[] PROGMEM = "mcmbl";
 const char string_2[] PROGMEM = "mscnt";
-const char string_3[] PROGMEM = "muoverflmax";
-const char string_4[] PROGMEM = "maxnumpat";
-const char string_5[] PROGMEM = "ccN";
-const char string_6[] PROGMEM = "ccmode";
-const char string_7[] PROGMEM = "muthresh";
-const char string_8[] PROGMEM = "maxpulse";
+const char string_3[] PROGMEM = "maxMuPrintx256";
+const char string_4[] PROGMEM = "maxMsgSizex256";
+const char string_5[] PROGMEM = "maxnumpat";
+const char string_6[] PROGMEM = "ccN";
+const char string_7[] PROGMEM = "ccmode";
+const char string_8[] PROGMEM = "muthresh";
+const char string_9[] PROGMEM = "maxpulse";
 
-const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6, string_7, string_8};
+const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6, string_7, string_8, string_9};
 
 #ifdef CMP_MEMDBG
 
@@ -318,8 +317,13 @@ uint8_t rssiCallback() { return 0; };	// Dummy return if no rssi value can be re
 
 
 void setup() {
-#ifdef LAN_WIZ
+#ifdef MAPLE_Mini
 	pinAsOutput(PIN_WIZ_RST);
+#ifndef LAN_WIZ
+	digitalWrite(PIN_WIZ_RST, HIGH);
+#endif
+#endif
+#ifdef LAN_WIZ
 	digitalWrite(PIN_WIZ_RST, LOW);		// RESET should be heldlowat least 500 us for W5500
 	delayMicroseconds(500);
 	digitalWrite(PIN_WIZ_RST, HIGH);
@@ -439,15 +443,17 @@ void setup() {
 
 #ifdef MAPLE_Mini
 void cronjob(HardwareTimer*) {
+	noInterrupts();
 #else
 void cronjob() {
+	cli();
 #endif
 	static uint16_t cnt0 = 0;
 	static uint8_t cnt1 = 0;
 	 const unsigned long  duration = micros() - lastTime;
 	 
 	 if (duration > maxPulse && ccmode == 0) { //Auf Maximalwert pruefen.
-		 int sDuration = maxPulse;
+		 int16_t sDuration = maxPulse;
 		 if (isLow(PIN_RECEIVE)) { // Wenn jetzt low ist, ist auch weiterhin low
 			 sDuration = -sDuration;
 		 }
@@ -455,13 +461,21 @@ void cronjob() {
 
 		 lastTime = micros();
 	 }
+	 digitalWrite(PIN_LED, blinkLED);
+	 blinkLED = false;
+
+#ifdef MAPLE_Mini
+	interrupts();
+#else
+	sei();
+#endif
+	
 	if (cnt0++ == 0) {
 		if (cnt1++ == 0) {
 			getUptime();
 		}
 	}
-	 digitalWrite(PIN_LED, blinkLED);
-	 blinkLED = false;
+
 }
 
 
@@ -492,7 +506,6 @@ void loop() {
 #endif
   if (ccmode == 0) {
 	musterDec.printMsgSuccess = false;
-	musterDec.NoMsgEnd = false;
 	while (FiFo.count()>0 ) { //Puffer auslesen und an Dekoder uebergeben
 
 		aktVal=FiFo.dequeue();
@@ -500,18 +513,9 @@ void loop() {
 		if (musterDec.MdebEnabled && musterDec.printMsgSuccess) {
 			fifoCount = FiFo.count();
 			if (fifoCount > MdebFifoLimit) {
-				if (musterDec.NoMsgEnd) {
-					if (musterDec.MredEnabled) {
-						MSG_PRINT(F("F"));
-						MSG_PRINT(fifoCount, HEX);
-						MSG_PRINT(F(";"));
-					}
-				}
-				else {
 					MSG_PRINT(F("MF="));
-					MSG_PRINT(fifoCount, DEC);
-					MSG_PRINTLN("");
-				}
+					MSG_PRINTLN(fifoCount, DEC);
+					//MSG_PRINTLN("");
 			}
 		}
 		if (musterDec.printMsgSuccess && LEDenabled) {
@@ -1153,7 +1157,7 @@ void cmd_Version()	// V: Version
 	    MSG_PRINT(F("Mhz) "));
 #endif
 	}
-	MSG_PRINT(F("(b"));
+	MSG_PRINT(F("(R: B"));
 	if (toggleBankEnabled == false) {
 		MSG_PRINT(bank);
 	} else {
@@ -1433,8 +1437,13 @@ void cmd_ccFactoryReset()
 inline void getConfig()
 {
   if (ccmode == 0 || ccmode == 15) {
-   MSG_PRINT(F("MS="));
-   MSG_PRINT(musterDec.MSenabled,DEC);
+   if (musterDec.MSeqEnabled == 0 || musterDec.MSenabled == 0) {
+      MSG_PRINT(F("MS="));
+      MSG_PRINT(musterDec.MSenabled,DEC);
+   }
+   else if (musterDec.MSenabled) {
+      MSG_PRINT(F("MSEQ=1"));
+   }
    MSG_PRINT(F(";MU="));
    MSG_PRINT(musterDec.MUenabled, DEC);
    MSG_PRINT(F(";MC="));
@@ -1456,18 +1465,15 @@ inline void getConfig()
       MSG_PRINT(F(";toggleBank=1"));
    }
   if (ccmode == 0 || ccmode == 15) {
-   if (musterDec.MuNoOverflow == true) {
-      MSG_PRINT(F(";MuNoOverflow=1"));
-   }
-   MSG_PRINT(F(";Mdebug="));
-   MSG_PRINT(musterDec.MdebEnabled, DEC);
    MSG_PRINT(F("_MScnt="));
    MSG_PRINT(musterDec.MsMoveCountmax, DEC);
-   if (musterDec.MuNoOverflow == true) {
-      MSG_PRINT(F(";MuOverflMax="));
-      MSG_PRINT(musterDec.MuOverflMax, DEC);
+   if (musterDec.maxMuPrint < musterDec.maxMsgSize) {
+      MSG_PRINT(F(";maxMuPrint="));
+      MSG_PRINT(musterDec.maxMuPrint, DEC);
    }
-   else {
+   MSG_PRINT(F(";maxMsgSize="));
+   MSG_PRINT(musterDec.maxMsgSize, DEC);
+   if (musterDec.MuSplitThresh > 0) {
       MSG_PRINT(F(";MuSplitThresh="));
       MSG_PRINT(musterDec.MuSplitThresh, DEC);
    }
@@ -1475,7 +1481,7 @@ inline void getConfig()
       MSG_PRINT(F(";mcMinBitLen="));
       MSG_PRINT(musterDec.mcMinBitLen, DEC);
    }
-   if (musterDec.cMaxNumPattern != CSetDef[4]) {
+   if (musterDec.cMaxNumPattern != CSetDef[5]) {
       MSG_PRINT(F(";maxNumPat="));
       MSG_PRINT(musterDec.cMaxNumPattern, DEC);
    }
@@ -1483,6 +1489,8 @@ inline void getConfig()
       MSG_PRINT(F(";maxPulse="));
       MSG_PRINT(musterDec.cMaxPulse, DEC);
    }
+   MSG_PRINT(F(";Mdebug="));
+   MSG_PRINT(musterDec.MdebEnabled, DEC);
    if (musterDec.MdebEnabled) {
       MSG_PRINT(F(";MdebFifoLimit="));
       MSG_PRINT(MdebFifoLimit, DEC);
@@ -1516,8 +1524,8 @@ inline void configCMD()
   else if (cmdstring.charAt(2) == 'L') {  //LED
 	bptr=&LEDenabled;
   }
-  else if (cmdstring.charAt(2) == 'O') {  //
-	bptr=&musterDec.MuNoOverflow;
+  else if (cmdstring.charAt(2) == 'Q') {  //MSeq
+    bptr=&musterDec.MSeqEnabled;
   }
   else if (cmdstring.charAt(2) == 'T') {  // toggleBankEnabled
 	bptr=&toggleBankEnabled;
@@ -1531,12 +1539,12 @@ inline void configCMD()
   } else {
 	return;
   }
-  storeFunctions(musterDec.MSenabled, musterDec.MUenabled, musterDec.MCenabled, musterDec.MredEnabled, musterDec.MdebEnabled, LEDenabled, musterDec.MuNoOverflow, toggleBankEnabled);
+  storeFunctions(musterDec.MSenabled, musterDec.MUenabled, musterDec.MCenabled, musterDec.MredEnabled, musterDec.MdebEnabled, LEDenabled, musterDec.MSeqEnabled, toggleBankEnabled);
 }
 
 inline void configSET()
 { 
-	char buffer[12];
+	char buffer[15];
 	int16_t i = cmdstring.indexOf("=",4);
 	uint8_t n = 0;
 	uint8_t val;
@@ -1581,23 +1589,37 @@ inline void configSET()
 	else if (n == 2) {			// mscnt
 		musterDec.MsMoveCountmax = val;
 	}
-	else if (n == 3) {			// MuOverflMax
-		musterDec.MuOverflMax = val;
+	else if (n == 3) {			//maxMuPrint
+		if (val == 0) {
+			val = 1;
+		}
+		musterDec.maxMuPrint = val * 256;
 	}
-	else if (n == 4) {			// maxnumpat
+	else if (n == 4) {			// 
+		if (val <=1 ) {
+			musterDec.maxMsgSize = 254;
+		}
+		else if (val * 256 > defMaxMsgSize) {
+			musterDec.maxMsgSize = defMaxMsgSize;
+		}
+		else {
+			musterDec.maxMsgSize = val * 256;
+		}
+	}
+	else if (n == 5) {			// maxnumpat
 		musterDec.cMaxNumPattern = val;
 	}
-	else if (n == 5) {			// ccN
+	else if (n == CSccN) {			// ccN
 		ccN = val;
 	}
-	else if (n == 6) {			// ccmode
+	else if (n == CSccmode) {			// ccmode
 		ccmode = val;
 		setCCmode();
 	}
-	else if (n == 7) {			// muthresh
+	else if (n == CSet16) {			// muthresh
 		musterDec.MuSplitThresh = val16;
 	}
-	else if (n == 8) {			// maxpulse
+	else if (n == CSet16+1) {			// maxpulse
 		if (val16 != 0) {
 			musterDec.cMaxPulse = -val16;
 		}
@@ -1610,6 +1632,7 @@ inline void configSET()
 	}
 }
 
+#ifdef LAN_WIZ
 void ethernetLoop()
 {
 	//check if there are any new clients
@@ -1623,6 +1646,7 @@ void ethernetLoop()
 		}
 	}
 }
+#endif
 
 void serialEvent()
 {
@@ -1772,28 +1796,29 @@ void setCCmode() {
 
 //================================= EEProm commands ======================================
 
-void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t deb, int8_t led, int8_t overfl, int8_t tgBank)
+void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t deb, int8_t led, int8_t mseq, int8_t tgBank)
 {
 	mu=mu<<1;
 	mc=mc<<2;
 	red=red<<3;
 	deb=deb<<4;
 	led=led<<5;
-	overfl=overfl<<6;
+	mseq=mseq<<6;
 	tgBank=tgBank<<7;
-	int8_t dat =  ms | mu | mc | red | deb | led | overfl | tgBank;
+	int8_t dat =  ms | mu | mc | red | deb | led | mseq | tgBank;
 	tools::EEwrite(addr_features,dat);
 	tools::EEstore();
 }
 
 void callGetFunctions(void)
 {
-	 getFunctions(&musterDec.MSenabled, &musterDec.MUenabled, &musterDec.MCenabled, &musterDec.MredEnabled, &musterDec.MdebEnabled, &LEDenabled, &musterDec.MuNoOverflow, &toggleBankEnabled);
+	 getFunctions(&musterDec.MSenabled, &musterDec.MUenabled, &musterDec.MCenabled, &musterDec.MredEnabled, &musterDec.MdebEnabled, &LEDenabled, &musterDec.MSeqEnabled, &toggleBankEnabled);
 }
 
-void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl, bool *tgBank)
+void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *mseq, bool *tgBank)
 {
-    int8_t high;
+    uint8_t high;
+    uint8_t val;
     int8_t dat = tools::EEread(addr_features);
 
     *ms=bool (dat &(1<<0));
@@ -1802,13 +1827,27 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     *red=bool (dat &(1<<3));
     *deb=bool (dat &(1<<4));
     *led=bool (dat &(1<<5));
-    *overfl=bool (dat &(1<<6));
-    *tgBank= bool (dat &(1<<7));
+    *mseq=bool (dat &(1<<6));
+    *tgBank=bool (dat &(1<<7));
     
     MdebFifoLimit = tools::EEread(CSetAddr[0]);
     musterDec.MsMoveCountmax = tools::EEread(CSetAddr[2]);
-    musterDec.MuOverflMax = tools::EEread(CSetAddr[3]);
-    musterDec.cMaxNumPattern = tools::EEread(CSetAddr[4]);
+    val = tools::EEread(CSetAddr[3]);
+    if (val == 0) {
+       val = 1;
+    }
+    musterDec.maxMuPrint = val * 256;
+    val = tools::EEread(CSetAddr[4]);
+    if (val <=1 ) {
+       musterDec.maxMsgSize = 254;
+    }
+    else if (val * 256 > defMaxMsgSize) {
+       musterDec.maxMsgSize = defMaxMsgSize;
+    }
+    else {
+       musterDec.maxMsgSize = val * 256;
+    }
+    musterDec.cMaxNumPattern = tools::EEread(CSetAddr[5]);
     bank = tools::EEread(addr_bank);
     if (bank > 9) {
       bank = 0;
@@ -1837,7 +1876,7 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
 
 void initEEPROMconfig(void)
 {
-	tools::EEwrite(addr_features, 0x3F);    	// Init EEPROM with all flags enabled, except MuNoOverflow and toggleBank
+	tools::EEwrite(addr_features, 0x37);    	// Init EEPROM with all flags enabled, except red, nn and toggleBank
 	
 	for (uint8_t i = 0; i < CSetAnzEE; i++) {
 		tools::EEwrite(CSetAddr[i], CSetDef[i]);
