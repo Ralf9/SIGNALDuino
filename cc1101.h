@@ -23,13 +23,15 @@ extern uint8_t ccBuf[50];
 namespace cc1101 {
 	
 #ifdef MAPLE_SDUINO
-	#define csPin	31
+	#define csPinA  31
+	#define csPin   12
 	#define mosiPin 28   // MOSI out
 	#define misoPin 29   // MISO in
 	#define sckPin  30   // SCLK out
 	SPIClass SPI_2(mosiPin, misoPin, sckPin);
 #elif MAPLE_CUL
-	#define csPin	7
+	#define csPinA	7
+	#define csPin   12
 	#define mosiPin 4   // MOSI out
 	#define misoPin 5   // MISO in
 	#define sckPin  6   // SCLK out
