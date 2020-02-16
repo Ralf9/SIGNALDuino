@@ -1157,7 +1157,7 @@ void cmd_Version()	// V: Version
 	    MSG_PRINT(F("Mhz) "));
 #endif
 	}
-	MSG_PRINT(F("(R: B"));
+	MSG_PRINT(F("(b"));
 	if (toggleBankEnabled == false) {
 		MSG_PRINT(bank);
 	} else {
