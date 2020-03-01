@@ -914,8 +914,12 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					mcDetected = false;
 					success = true;
 					printMsgSuccess = true;
+					m_truncated = false;
 					
-					if (p_valid > 0 || (p_valid == 0 && (messageLen - mend) >= minMessageLen)) {  // wenn Nachrichtenende erkannt wurde, dann muss der Rest laenger als minMessageLen sein
+					if (p_valid == 1 || (messageLen - mend) >= minMessageLen) {  // wenn Nachrichtenende erkannt wurde, dann muss der Rest laenger als minMessageLen sein
+						//printOut();
+						//MSG_PRINT("p_valid=");
+						//MSG_PRINTLN(p_valid);
 						bufferMove(mend-1);
 						mstart = 0;
 						mcRepeat = true;
