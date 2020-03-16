@@ -33,8 +33,8 @@
 
 // Config flags for compiling correct options / boards Define only one
 
-//#define MAPLE_SDUINO 1
-#define MAPLE_CUL 1
+#define MAPLE_SDUINO 1
+//#define MAPLE_CUL 1
 //#define LAN_WIZ 1	// bitte auch das "#define LAN_WIZ 1" in der SignalDecoder.h beachten 
 
 //#define ARDUINO_ATMEGA328P_MINICUL 1
@@ -64,7 +64,7 @@
 
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "4.1.0-dev200306"
+#define PROGVERS               "4.1.0-dev200316"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -1208,7 +1208,7 @@ void cmd_bank()
 			}
 		}
 		else {
-			MSG_PRINTLN(F("Error! Bank "));
+			MSG_PRINT(F("Error! Bank "));
 			MSG_PRINT(bank);
 			MSG_PRINTLN(F(" is not initialized"));
 		}
@@ -1732,8 +1732,12 @@ inline void configCMD()
   else if (cmdstring.charAt(2) == 'Q') {  //MSeq
     bptr=&musterDec.MSeqEnabled;
   }
-  else if (cmdstring.charAt(2) == 'T') {  // toggleBankEnabled
-	bptr=&toggleBankEnabled;
+//  else if (cmdstring.charAt(2) == 'T') {  // toggleBankEnabled
+//	bptr=&toggleBankEnabled;
+//  }
+  else {
+	unsuppCmd = true;
+	return;
   }
 
   if (cmdstring.charAt(1) == 'E') {   // Enable
@@ -1742,6 +1746,7 @@ inline void configCMD()
   else if (cmdstring.charAt(1) == 'D') {  // Disable
 	*bptr=false;
   } else {
+	unsuppCmd = true;
 	return;
   }
   storeFunctions(musterDec.MSenabled, musterDec.MUenabled, musterDec.MCenabled, musterDec.MredEnabled, musterDec.MdebEnabled, LEDenabled, musterDec.MSeqEnabled, toggleBankEnabled);
