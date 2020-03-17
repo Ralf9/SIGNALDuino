@@ -170,7 +170,7 @@ inline void SignalDetectorClass::doDetect()
 	
 	if (!valid) {			// Nachrichtenende erkannt -> alles bis zum Nachrichtenende wird ausgegeben
 		
-		for (uint8_t n = 10; n > 0; --n) {
+		for (uint8_t n = 70; n > 0; --n) {	// maxMsgSize 1500 / minMessageSize 26 = 57
 			// Try output
 			processMessage(0);
 			if (messageLen == 0) {
@@ -218,12 +218,12 @@ inline void SignalDetectorClass::doDetect()
 					//DBG_PRINTLN(F("addP_histop>2"));  // pattern buffer full after proccessMessage
 					//printOut();
 					bool saveMsgSuccess = false;
-					for (uint8_t n = 10; n > 0; --n) {
+					for (uint8_t n = 70; n > 0; --n) {
 						if (printMsgSuccess) {
 							saveMsgSuccess = true;
 							printMsgSuccess = false;
 						}
-						processMessage(2);
+						processMessage(2);	// Patternpuffer overflow
 						if (messageLen < minMessageLen || printMsgSuccess == false) {
 							break;
 						}
