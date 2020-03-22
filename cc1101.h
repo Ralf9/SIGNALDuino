@@ -233,7 +233,7 @@ namespace cc1101 {
 		if (waitTo_Miso() == 0) {                       // wait with timeout until MISO goes low
 			return false;          // timeout
 		}
-		uint8_t ret = sendSPI(cmd);                     // send strobe command
+		sendSPI(cmd);                     // send strobe command
 		//wait_Miso();                                  // wait until MISO goes low
 		cc1101_Deselect();                              // deselect CC1101
 		return true;
