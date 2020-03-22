@@ -3,7 +3,9 @@
 #ifndef _tools_h
 #define _tools_h
 
+#ifndef MAPLE_Mini
 #include <EEPROM.h>
+#endif
 //#include "Storage.h"
 
 extern uint16_t bankOffset;
