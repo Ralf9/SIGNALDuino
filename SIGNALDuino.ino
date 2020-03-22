@@ -28,6 +28,11 @@
 *   You should have received a copy of the GNU General Public License
 *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+
+	Version from: https://github.com/Ralf9/SIGNALDuino/blob/dev-r41x_cc110
+
+*-------------------------------------------------------------------------------------------------------------------
+	
 */
 
 
@@ -35,14 +40,18 @@
 
 #define MAPLE_SDUINO 1
 //#define MAPLE_CUL 1
-//#define LAN_WIZ 1	// bitte auch das "#define LAN_WIZ 1" in der SignalDecoder.h beachten 
-
+//#define LAN_WIZ 1
 //#define ARDUINO_ATMEGA328P_MINICUL 1
 //#define OTHER_BOARD_WITH_CC1101  1
-
 //#define CMP_MEMDBG 1
 
-// bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten 
+// bitte auch das "#define LAN_WIZ 1" in der SignalDecoder.h beachten
+// bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
+
+#define PROGNAME               "RF_RECEIVER"
+#define PROGVERS               "4.1.0-dev200322"
+#define VERSION_1               0x41
+#define VERSION_2               0x0d
 
 #ifdef OTHER_BOARD_WITH_CC1101
 	#define CMP_CC1101
@@ -61,12 +70,6 @@
 	#define MAPLE_Mini
 	#define CMP_CC1101
 #endif
-
-
-#define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "4.1.0-dev200316"
-#define VERSION_1               0x41
-#define VERSION_2               0x0d
 
 #ifdef CMP_CC1101
 	#ifdef ARDUINO_ATMEGA328P_MINICUL  // 8Mhz 
@@ -108,15 +111,25 @@
 //#define WATCHDOG	1 // Der Watchdog ist in der Entwicklungs und Testphase deaktiviert. Es muss auch ohne Watchdog stabil funktionieren.
 //#define DEBUGSENDCMD  1
 //(#define SENDTODECODER 1) ist neu ccmode=15 -> damit wird in der send_raw Routine anstatt zu senden, die Pulse direkt dem Decoder uebergeben
+
 #define DEBUG                  1
 
 #ifdef WATCHDOG
 	#include <avr/wdt.h>
 #endif
+
+//---------------------------------------------------------------------------------------------
+
+#include "cc1101.h"
 #include "FastDelegate.h"
 #include "output.h"
 #include "bitstore.h"
 #include "signalDecoder4.h"
+#include "SimpleFIFO.h"
+
+SimpleFIFO<int16_t,FIFO_LENGTH> FiFo; //store FIFO_LENGTH # ints
+SignalDetectorClass musterDec;
+
 #ifdef MAPLE_Mini
   #include <malloc.h>
   extern char _estack;
@@ -141,18 +154,14 @@
   EthernetClient client;
 #endif
 
-  #include "SimpleFIFO.h"
-SimpleFIFO<int16_t,FIFO_LENGTH> FiFo; //store FIFO_LENGTH # ints
-SignalDetectorClass musterDec;
-
-#include "cc1101.h"
-
 #define pulseMin  90
+
 #ifdef MAPLE_Mini
   #define maxCmdString 600
 #else
   #define maxCmdString 350
 #endif
+
 #define maxSendPattern 10
 #define mcMinBitLenDef   17
 #define ccMaxBuf 64
@@ -344,7 +353,6 @@ void setup() {
 	Ethernet.begin(mac, ip, gateway, subnet);
 	server.begin();		// start listening for clients
 #endif
-	uint8_t ccVersion;
 	Serial.begin(BAUDRATE);
 	//while (!Serial) {
 	//	; // wait for serial port to connect. Needed for native USB
@@ -632,8 +640,6 @@ void getRxFifo(uint16_t Boffs) {
 		}
 	}
 }
-
-
 
 //========================= Pulseauswertung ================================================
 void handleInterrupt() {
@@ -1088,8 +1094,8 @@ void IT_CMDs();
 
 void HandleCommand()
 {
-	uint8_t reg;
-	uint8_t val;
+//	uint8_t reg;
+//	uint8_t val;
 	uint8_t i;
 	
 	for (i=0; i < cmdAnz; i++) {
@@ -1150,7 +1156,7 @@ void cmd_bank()
 	if (cmdstring.charAt(1) >= 'A' && cmdstring.charAt(1) <= 'D') {		// Radio A-D
 		remRadionr = radionr;	// Radionr merken
 		radionr = (uint8_t)cmdstring.charAt(1) - 65;
-		uint8_t statRadio = tools::EEread(addr_statRadio + radionr);
+		//uint8_t statRadio = tools::EEread(addr_statRadio + radionr);
 		if (radio_bank[radionr] > 0x1F) {
 			MSG_PRINTLN(F("radio is not aktive!"));
 			radionr = remRadionr;
@@ -2203,3 +2209,6 @@ void initEEPROM(void)
   }
   callGetFunctions();
 }
+//-------------------------------------------------------------------------------------------------------------------
+// <eof>
+//-------------------------------------------------------------------------------------------------------------------
