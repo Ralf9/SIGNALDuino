@@ -415,7 +415,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 	
 	if (mcDetected == true || messageLen >= minMessageLen) {
 		success = false;
-		uint8_t n;
+		uint8_t n = 0;
 		m_overflow = (messageLen == maxMsgSize) ? true : false;
 
 #if DEBUGDETECT >= 1
@@ -641,7 +641,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 							//if (MsMoveCount == 0) {
 								ms0pattern[idx] = pattern[idx];		// pattern merken
 							//}
-							n = sprintf(msbuf, "P%i=%i;", idx,pattern[idx]);
+							n = sprintf(msbuf, "P%u=%i;", idx,pattern[idx]);
 						
 							strcat(buf,msbuf);
 						}
@@ -674,10 +674,10 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					if (MsEqSkip == 0) {
 						MSG_WRITE(buf,n);
 					
-						n = sprintf(msbuf, ";CP=%i;SP=%i;", clock, sync); // ClockPulse & SyncPulse
+						n = sprintf(msbuf, ";CP=%x;SP=%x;", clock, sync); // ClockPulse & SyncPulse
 						MSG_PRINT(msbuf);
 						#ifdef CMP_CC1101
-						n = sprintf(msbuf, "R=%i;", rssiValue);     // Signal Level (RSSI)
+						n = sprintf(msbuf, "R=%u;", rssiValue);     // Signal Level (RSSI)
 						MSG_PRINT(msbuf);
 						#endif
 						if (msEqCnt > 0) {
@@ -772,7 +772,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 			success = true;
 		  }
 		  else {		  // m_endfound && (mend - mstart) < minMessageLen)  -> weiter mit MU message verarbeitung
-			success == false;
+			success = false;
 		  }
 		}
 		if (success == false && (MUenabled || MCenabled)) {
@@ -860,7 +860,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					
 					mcdecoder.printBufMessageHexStr();
 					
-					n = sprintf(buf, ";C=%i;L=%i;", mcdecoder.clock, mcdecoder.ManchesterBits.valcount);
+					n = sprintf(buf, ";C=%u;L=%u;", mcdecoder.clock, mcdecoder.ManchesterBits.valcount);
 					MSG_PRINT(buf);
 					
 					/*MSG_PRINT(SERIAL_DELIMITER);
@@ -1047,14 +1047,14 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					{
 						if (pattern[idx] == 0 || histo[idx] == 0) continue; 
 						//MSG_PRINT("P"); MSG_PRINT(idx,HEX); MSG_PRINT("="); MSG_PRINT(pattern[idx]); MSG_PRINT(SERIAL_DELIMITER);  // Patternidx=Value
-						n = sprintf(buf, "P%i=%i;", idx, pattern[idx]);
+						n = sprintf(buf, "P%x=%i;", idx, pattern[idx]);
 						MSG_PRINT(buf);
 					}
 					
-					n = sprintf(buf, "CP=%i;", clock);
+					n = sprintf(buf, "CP=%x;", clock);
 					MSG_PRINT(buf);
 					#ifdef CMP_CC1101
-						n = sprintf(buf, "R=%i;", rssiValue);	// Signal Level (RSSI)
+						n = sprintf(buf, "R=%u;", rssiValue);	// Signal Level (RSSI)
 						MSG_PRINT(buf);
 					#endif
 					
@@ -1091,7 +1091,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 						{
 							MSG_PRINT(message[i],HEX);
 						}
-						MSG_PRINT("HeX");
+						//MSG_PRINT("HeX");
 					}
 					
 						MSG_PRINT(SERIAL_DELIMITER);
@@ -1303,7 +1303,7 @@ void SignalDetectorClass::calcHisto(const uint8_t startpos, uint16_t endpos)
 	if (endpos == 0) endpos = messageLen-1;
 	uint8_t bstartpos = startpos/2;       // *4/8;
 	uint16_t bendpos = endpos/2;           // *4/8;
-	uint8_t bval;
+	uint8_t bval = 0;
 	if (startpos % 2 == 1)  // ungerade
 	{
 		message.getByte(bstartpos,&bval);
@@ -1646,7 +1646,7 @@ void ManchesterpatternDecoder::printBufMessageHexStr()
 {
 	char hex[]="0123456789ABCDEF";
 
-	uint8_t n;
+	uint8_t n = 0;
 	uint8_t idx;
 	uint8_t i = 0;
 	// Bytes are stored from left to right in our buffer. We reverse them for better readability
@@ -1676,7 +1676,7 @@ void ManchesterpatternDecoder::printBufMessageHexStr()
 
 unsigned char ManchesterpatternDecoder::getMCByte(const uint8_t idx) {
 
-	unsigned char c;
+	unsigned char c = 0;
 	ManchesterBits.getByte(idx,&c);
 	return  c;
 }
@@ -1958,8 +1958,7 @@ const bool ManchesterpatternDecoder::doDecode() {
 
 													//MSG_PRINT(" ES MC ");
 
-}
-/*
+} */
 
 /** @brief (Verifies if found signal data is a valid manchester signal, returns true or false)
 *
