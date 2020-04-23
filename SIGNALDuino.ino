@@ -49,7 +49,7 @@
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "4.1.0-dev200322"
+#define PROGVERS               "4.1.0-dev200422"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -166,6 +166,7 @@ SignalDetectorClass musterDec;
 #define mcMinBitLenDef   17
 #define ccMaxBuf 64
 #define defMaxMsgSize 1500	// selber Wert wie in signalDecoder4.h
+#define maxSendEcho 100
 
 #define radioOokAsk 1
 #define defSelRadio 1	// B
@@ -649,7 +650,6 @@ void handleInterrupt() {
   cli();
 #endif
   const unsigned long Time=micros();
-  //const bool state = digitalRead(PIN_RECEIVE);
   const unsigned long  duration = Time - lastTime;
   lastTime = Time;
   if (duration >= pulseMin) {//kleinste zulaessige Pulslaenge
@@ -836,6 +836,25 @@ void send_cmd()
 	#define manchester 1
 	#define raw 2
 	#define maxSendCmd 5
+	
+	uint16_t tmpBankoff;
+	uint8_t remccmode = ccmode;
+	uint8_t tmpBank;
+	
+	tmpBank = radio_bank[1];	// Modul B
+	if (tmpBank > 9) {
+		MSG_PRINTLN(F("Radio B is not active!"));
+		return;
+	}
+	tmpBankoff = getBankOffset(tmpBank);
+	ccmode = tools::EEread(tmpBankoff + addr_ccmode);
+	if (ccmode != 0 && ccmode != 15) {
+		MSG_PRINTLN(F("ASK/OOK send is only with ccmode 0 or 15 possible!"));
+		ccmode = remccmode;
+		return;
+	}
+	uint8_t remRadionr = radionr;
+	radionr = 1;
 
 	uint8_t repeats=1;  // Default is always one iteration so repeat is 1 if not set
 	int16_t start_pos=0;
@@ -906,7 +925,7 @@ void send_cmd()
 			}
 			command[cmdNo].buckets[counter]=cmdstring.substring(startdata, start_pos-1).toInt();
 #ifdef DEBUGSENDCMD
-		        MSG_PRINT("P");
+			MSG_PRINT("P");
 			MSG_PRINT(counter);
 			MSG_PRINT("=");
 			MSG_PRINTLN(command[cmdNo].buckets[counter]);
@@ -979,7 +998,13 @@ void send_cmd()
 		}
 
 	  if (ccmode == 0) {	//normal send
-		MSG_PRINT(cmdstring); // echo
+		if (cmdstring.length() <= maxSendEcho) {
+			MSG_PRINT(cmdstring); // echo
+		}
+		else {
+			MSG_PRINT(cmdstring.substring(0, maxSendEcho)); // echo
+			MSG_PRINT(F(".."));
+		}
 		if (ccParamAnz > 0) {
 			MSG_PRINT(F("ccreg write back "));
 			for (uint8_t i=0;i<ccParamAnz;i++)
@@ -996,10 +1021,13 @@ void send_cmd()
 		musterDec.decode(&dur);
 	  }
 	}
+	
 //#ifndef SENDTODECODER
 	enableReceive();	// enable the receiver
 	MSG_PRINTLN("");
 //#endif
+	ccmode = remccmode;
+	radionr = remRadionr;
 }
 
 
@@ -1113,6 +1141,9 @@ void HandleCommand()
 		//MSG_PRINT(cmd1[i]);
 		cmdFP[i]();
 	}
+	else {
+		unsuppCmd = true;
+	}
 	//MSG_PRINTLN("");
 	
 	if (unsuppCmd) {
@@ -1178,7 +1209,7 @@ void cmd_bank()
 				if ((radio_bank[i] & 0x0F) == bank) {	// testen ob die ausgewaehlte Bank noch frei ist
 					MSG_PRINT(F("Bank "));
 					MSG_PRINT(bank);
-					MSG_PRINT(F(" is already used by Radio "));
+					MSG_PRINT(F(" is already used by radio "));
 					MSG_WRITE(i + 'A');
 					MSG_PRINTLN("");
 					bank = remBank;
@@ -1214,9 +1245,10 @@ void cmd_bank()
 			}
 		}
 		else {
-			MSG_PRINT(F("Error! Bank "));
+			MSG_PRINT(F("The bank "));
 			MSG_PRINT(bank);
-			MSG_PRINTLN(F(" is not initialized"));
+			MSG_PRINT(F(" was not complete initialized, therefore the bank and radio is reseted to sduino defaults (raw e). "));
+			cmd_ccFactoryReset();
 		}
 	}
 	else if (posDigit == 2) {		// es wurde ein Radio angegeben und keine bank angegeben -> das angegebene radio wird das aktuelle
@@ -1225,7 +1257,7 @@ void cmd_bank()
 			bankOffset = getBankOffset(bank);
 			ccN = tools::EEbankRead(addr_ccN);
 			ccmode = tools::EEbankRead(addr_ccmode);
-			MSG_PRINT(F("switch to Radio "));
+			MSG_PRINT(F("switch to radio "));
 			MSG_WRITE(radionr + 'A');
 			MSG_PRINTLN("");
 		}
@@ -1236,6 +1268,9 @@ void cmd_bank()
 	}
 	else if (posDigit == 1 && cmdstring.charAt(0) == 'b' && (cmdstring.length() == 1 || cmdstring.charAt(1) == '?')) {
 		print_Bank();
+	}
+	else if (posDigit == 1 && cmdstring.charAt(1) == 's') {
+		print_bank_sum();
 	}
 	else if (posDigit == 1 && cmdstring.charAt(1) == 'r') {
 		print_radio_sum();
@@ -1288,6 +1323,71 @@ void print_Bank()
 	
 	print_ccconf(bankOffset);
 	MSG_PRINTLN("");
+}
+
+void print_bank_sum()	// bs - Banksummary
+{
+	char bankStr[23];
+	char radioStr[23];
+	char Nstr[23];
+	char ccmodeStr[23];
+	uint16_t sBankoff;
+	uint8_t sCcmode;
+	uint8_t i2;
+	
+	for (uint8_t i = 0; i <= 9; i++) {
+		i2 = i * 2;
+		bankStr[i2] = '0' + i;
+		bankStr[i2+1] = ' ';
+		
+		for (uint8_t j = 0; j < 4; j++) {
+			radioStr[i2] = '-';
+			radioStr[i2+1] = ' ';
+			if (i == radio_bank[j]) {
+				radioStr[i2] = 'A' + j;
+				if (j == radionr) {
+					radioStr[i2+1] = '*';
+				}
+				break;
+			}
+		}
+		
+		sBankoff = getBankOffset(i);
+		if ((tools::EEread(sBankoff) == i && tools::EEread(sBankoff+1) == (255 - i)) || i == 0) {
+			Nstr[i2] = '0' + tools::EEread(sBankoff + addr_ccN);
+			sCcmode = tools::EEread(sBankoff + addr_ccmode);
+			if (sCcmode < 10) {
+				ccmodeStr[i2] = '0' + sCcmode;
+			}
+			else {
+				ccmodeStr[i2] = 'A' + sCcmode - 10;
+			}
+		}
+		else {
+			Nstr[i2] = '-';
+			ccmodeStr[i2] = '-';
+		}
+		Nstr[i2+1] = ' ';
+		ccmodeStr[i2+1] = ' ';
+	}
+	bankStr[20] = 0;
+	radioStr[20] = 0;
+	Nstr[20] = 0;
+	ccmodeStr[20] = 0;
+	
+	MSG_PRINT(F("Bank__ "));
+	MSG_PRINT(bankStr);
+	MSG_PRINT(F(" Radio_ "));
+	MSG_PRINT(radioStr);
+	if (radioStr[19] == '*') {	// wenn * am Ende, dann zusaetzliches Leerzeichen einfuegen damit es wieder 2 Leerzeichen sind.
+		MSG_PRINT(F(" "));
+	}
+	MSG_PRINT(F(" N_____ "));
+	MSG_PRINT(Nstr);
+	MSG_PRINT(F(" ccmode "));
+	MSG_PRINTLN(ccmodeStr);
+		
+	//	Bank__ 0 1 2 3 4 5 6 7 8 9  Radio_ B A - C - - - - - -  N_____ 0 0 2 3 4 - - - - -  ccmode 0 3 3 3 2 - - - - -
 }
 
 void print_radio_sum()	// br - Bankinfo fuer alle cc1101 denen eine Bank zugeordnet ist, ausgeben
@@ -1627,7 +1727,7 @@ void cmd_configFactoryReset()	// eC - initEEPROMconfig
 
 void cmd_ccFactoryReset()	// e<0-9>
 {
-         if (isDigit(cmdstring.charAt(1))) {
+         if (cmdstring.charAt(0) == 'e' && isDigit(cmdstring.charAt(1))) {
             cmd_bank();
          }
          cc1101::ccFactoryReset();
@@ -1642,7 +1742,9 @@ void cmd_ccFactoryReset()	// e<0-9>
             tools::EEbankWrite(1, (255 - bank));
          }
          tools::EEstore();
-         print_Bank();
+         if (cmdstring.charAt(0) == 'e') {
+            print_Bank();
+         }
 }
 
 inline void getConfig()
@@ -2150,6 +2252,7 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
        tools::EEbankWrite(addr_ccmode, ccmode);
        tools::EEstore();
     }
+    ccmode = ccmode & 0x0F;
     high = tools::EEread(CSetAddr[CSet16]);
     musterDec.MuSplitThresh = tools::EEread(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
     high = tools::EEread(CSetAddr[CSet16+2]);
