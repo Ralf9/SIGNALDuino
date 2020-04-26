@@ -49,7 +49,7 @@
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "4.1.0-dev200422"
+#define PROGVERS               "4.1.0-dev200425"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -190,7 +190,7 @@ volatile unsigned long lastTime = micros();
 bool hasCC1101 = false;
 bool LEDenabled = true;
 bool toggleBankEnabled = false;
-bool RXenabled[] = {true, true, true, true};	// 1 - enable receive, Zwischenspeicher zum enablereceive merken
+bool RXenabled[] = {false, false, false, false};	// true - enable receive, Zwischenspeicher zum enablereceive merken
 bool unsuppCmd = false;
 uint8_t MdebFifoLimit = 120;
 uint8_t bank = 0;
@@ -459,16 +459,16 @@ void setup() {
 			bankOffset = getBankOffset(radio_bank[radionr]);
 			ccmode = tools::EEbankRead(addr_ccmode);
 			if (radionr != 1 || ccmode > 0 || cc1101::regCheck()) {
-				enableReceive();
-			//if (musterDec.MdebEnabled && RXenabled == true && ccmode < 15) {
-			//	MSG_PRINTLN(F("receiver enabled"));
-			//}
+				en_dis_receiver(true);
 			}
 			else {
-				MSG_PRINTLN(F("cc1101 is for OOK not correctly set."));
+				MSG_PRINT(F("cc1101 "));
+				MSG_WRITE('A' + radionr);
+				MSG_PRINT(F(" is for OOK not correctly set. "));
 			}
 		}
 	}
+	MSG_PRINTLN("");
 	ccmode = remccmode;
 	bankOffset = remBankOffset;
 	radionr = remRadionr;
@@ -696,7 +696,6 @@ void disableReceive() {
   if (hasCC1101) cc1101::setIdleMode();
   #endif
   FiFo.flush();
-
 }
 
 /*void send_rawx(const uint8_t startpos,const uint16_t endpos,const int16_t *buckets, String *source=&cmdstring)
@@ -1416,6 +1415,9 @@ void print_radio_sum()	// br - Bankinfo fuer alle cc1101 denen eine Bank zugeord
 		MSG_WRITE('A' + i);
 		MSG_PRINT(F(" b="));
 		MSG_PRINT(rbank);
+		if (RXenabled[i] == false) {
+			MSG_PRINT(F(" rx=0"));
+		}
 		if (rN > 0) {
 			MSG_PRINT(F(" N="));
 			MSG_PRINT(rN);
@@ -1436,7 +1438,7 @@ void cmd_Version()	// V: Version
 #ifdef PIN_MARK433
 	    MSG_PRINT(F("(minicul "));
 	    MSG_PRINT(isLow(PIN_MARK433) ? "433" : "868");
-	    MSG_PRINT(F("Mhz) "));
+	    MSG_PRINT(F("MHz) "));
 #endif
 	}
 	MSG_PRINT(F("(R:"));
@@ -2143,19 +2145,68 @@ inline void getPing()
 	delayMicroseconds(500);
 }
 
-inline void changeReceiver() {
-  if (cmdstring.charAt(1) == 'Q')
-  {
-  	disableReceive();
-	RXenabled[radionr] = false;
-	MSG_PRINTLN("RX=0");
-  }
-  if (cmdstring.charAt(1) == 'E' && ccmode < 15)
-  {
-	RXenabled[radionr] = true;
-  	enableReceive();
-	MSG_PRINTLN("RX=1");
-  }
+void en_dis_receiver(bool en_receiver)
+{
+	if (ccmode >= 15) {
+		return;
+	}
+	if (en_receiver) {
+		RXenabled[radionr] = true;
+		enableReceive();
+		MSG_PRINT(F("rx"));
+		MSG_WRITE('A' + radionr);
+		MSG_PRINT(F("=1"));
+	}
+	else {
+		disableReceive();
+		RXenabled[radionr] = false;
+		MSG_PRINT(F("rx"));
+		MSG_WRITE('A' + radionr);
+		MSG_PRINT(F("=0"));
+	}
+	MSG_PRINT(F(" "));
+}
+
+inline void changeReceiver()
+{
+	if (cmdstring.charAt(1) != 'Q' && cmdstring.charAt(1) != 'E') {
+		unsuppCmd = true;
+		return;
+	}
+
+	uint8_t remRadionr = radionr;
+	uint8_t remccmode = ccmode;
+	uint8_t remBankOffset = bankOffset;
+	uint8_t ra;
+	uint8_t re;
+	radionr = 255;
+	if (cmdstring.charAt(2) >= 'A' && cmdstring.charAt(2) <= 'D') {	// Radio A-D
+		radionr = (uint8_t)cmdstring.charAt(2) - 65;
+		ra = radionr;
+		re = radionr+1;
+	}
+	else {	// alle radio
+		ra = 0;
+		re = 4;
+	}
+	for (radionr = ra; radionr < re; radionr++) {
+		if (radio_bank[radionr] > 9) {	// radio nicht aktiv
+			continue;
+		}
+		bankOffset = getBankOffset(radio_bank[radionr]);
+		ccmode = tools::EEbankRead(addr_ccmode);
+		if (cmdstring.charAt(1) == 'E') {
+			en_dis_receiver(true);
+		}
+		else {
+			en_dis_receiver(false);
+		}
+	}
+	MSG_PRINTLN("");
+	
+	radionr = remRadionr;
+	ccmode = remccmode;
+	bankOffset = remBankOffset;
 }
 
 void setCCmode() {
