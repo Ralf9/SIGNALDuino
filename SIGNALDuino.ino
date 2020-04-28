@@ -49,7 +49,7 @@
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "4.1.0-dev200425"
+#define PROGVERS               "4.1.0-dev200427"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -353,7 +353,7 @@ void setup() {
 	digitalWrite(PIN_WIZ_RST, HIGH);
 	Ethernet.begin(mac, ip, gateway, subnet);
 	server.begin();		// start listening for clients
-#endif
+#else
 	Serial.begin(BAUDRATE);
 	//while (!Serial) {
 	//	; // wait for serial port to connect. Needed for native USB
@@ -364,7 +364,7 @@ void setup() {
 			break;
 		}
 	}
-	
+#endif
 	if (musterDec.MdebEnabled) {
 		DBG_PRINTLN(F("Using sFIFO"));
 	}
@@ -1332,14 +1332,16 @@ void print_bank_sum()	// bs - Banksummary
 	char ccmodeStr[23];
 	uint16_t sBankoff;
 	uint8_t sCcmode;
+	uint8_t i;
 	uint8_t i2;
+	uint8_t j;
 	
-	for (uint8_t i = 0; i <= 9; i++) {
+	for (i = 0; i <= 9; i++) {
 		i2 = i * 2;
 		bankStr[i2] = '0' + i;
 		bankStr[i2+1] = ' ';
 		
-		for (uint8_t j = 0; j < 4; j++) {
+		for (j = 0; j < 4; j++) {
 			radioStr[i2] = '-';
 			radioStr[i2+1] = ' ';
 			if (i == radio_bank[j]) {
@@ -1384,7 +1386,43 @@ void print_bank_sum()	// bs - Banksummary
 	MSG_PRINT(F(" N_____ "));
 	MSG_PRINT(Nstr);
 	MSG_PRINT(F(" ccmode "));
-	MSG_PRINTLN(ccmodeStr);
+	MSG_PRINT(ccmodeStr);
+	MSG_PRINT(F("  "));
+	
+	uint8_t ch;
+	for (i = 0; i <= 9; i++) {
+		i2 = i * 2;	
+		if (Nstr[i2] != '-') {		// Bank Aktiv?
+			if (ccmodeStr[i2] == '0') {
+				strcpy(bankStr, "SlowRF");
+				j = 6;
+			}
+			else {
+				for (j = 0; j < 8; j++) {
+					ch = tools::EEread(0x40 + (i * 8) + j);
+					if ((ch >= 32 && ch <= 122) || ch == 0) {	// space to z
+						bankStr[j] = ch;
+						if (ch == 0) {	// end
+							break;
+						}
+					}
+					else {	// kein gueltiges Zeichen
+						j = 0;
+						break;
+					}
+				}
+			}
+			if (j > 3) {
+				bankStr[8] = 0;
+				MSG_PRINT(F(" "));
+				MSG_PRINT(i);		// BankNr
+				MSG_PRINT(F(" - "));
+				MSG_PRINT(bankStr);
+				MSG_PRINT(F(" "));
+			}
+		}
+	}
+	MSG_PRINTLN("");
 		
 	//	Bank__ 0 1 2 3 4 5 6 7 8 9  Radio_ B A - C - - - - - -  N_____ 0 0 2 3 4 - - - - -  ccmode 0 3 3 3 2 - - - - -
 }
@@ -1562,7 +1600,7 @@ void ccRegWrite()	// CW cc register write
 			break;
 		}
 		reg = tools::cmdstringPos2int(pos);
-		if (reg > 0x3F) {
+		if (reg > 0x47) {
 			break;
 		}
 		val = tools::cmdstringPos2int(pos+2);
@@ -1576,7 +1614,16 @@ void ccRegWrite()	// CW cc register write
 		else if (reg == addr_ccN) {
 			tmp_ccN = val;
 		}
-		tools::EEbankWrite(reg, val);
+		if (reg < 0x40) {
+			tools::EEbankWrite(reg, val);
+			if (reg == 0x37) {		// Ende der patable
+				cc1101::writePatable();
+			}
+		}
+		else {		// 0x40 - 0x47  Bank Kurzbeschreibung (max 8 Zeichen)
+			reg = reg + (bank * 8);
+			tools::EEwrite(reg, val);
+		}
 		/*MSG_PRINT(F("reg="));
 		printHex2(reg);
 		MSG_PRINT(F(" val="));
@@ -2212,10 +2259,14 @@ inline void changeReceiver()
 void setCCmode() {
   if (ccmode == 0) {	// normal OOK
     enableReceive();
-    pinAsOutput(PIN_SEND);
+    if (radionr == 1) {
+      pinAsOutput(PIN_SEND);
+    }
   }
   else {		// mit ccFIFO
-    pinAsInput(PIN_SEND);
+    if (radionr == 1) {
+       pinAsInput(PIN_SEND);
+    }
     disableReceive();
     if (cc1101::flushrx()) {
       enableReceive();
