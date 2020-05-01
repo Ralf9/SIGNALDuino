@@ -504,12 +504,6 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		return readReg(CC1101_RXBYTES,CC1101_STATUS);  // 
 	}
 	
-	uint8_t getChipStatusByte()
-	{
-		return cmdStrobe(CC1101_SNOP);
-	}
-	
-	
 	bool readRXFIFO(uint8_t len) {
 		bool dup = true;
 		uint8_t rx;
@@ -554,10 +548,26 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		//MSG_PRINTLN("");
 	}
 	
-	inline void setIdleMode()
+	uint8_t ccStrobe_SNOP()	// No operation. May be used to get access to the chip status byte
 	{
-		cmdStrobe(CC1101_SIDLE);                             // Idle mode
-		delay(1);
+		return cmdStrobe(CC1101_SNOP);
+	}
+	
+//	void setIdleMode()
+	void ccStrobe_SIDLE()	// Idle mode
+	{
+		cmdStrobe(CC1101_SIDLE);
+		//delay(1);
+	}
+	
+	void ccStrobe_SRX()	// Enable RX
+	{
+		cmdStrobe(CC1101_SRX);
+	}
+	
+	void ccStrobe_SFRX()	// Flush the RX FIFO buffer
+	{
+		cmdStrobe(CC1101_SFRX);
 	}
 	
 	 uint8_t flushrx() {		// Flush the RX FIFO buffer
@@ -586,7 +596,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 			DBG_PRINTLN(F("CC1101: Setting TX failed"));
 			return false;
 		}
-		setIdleMode();
+		cmdStrobe(CC1101_SIDLE);
 		uint8_t maxloop = 0xff;
 		while (maxloop-- && (cmdStrobe(CC1101_STX) & CC1101_STATUS_STATE_BM) != CC1101_STATE_TX)  // TX enable
 			delay(1);
