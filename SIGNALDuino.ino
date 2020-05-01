@@ -49,7 +49,7 @@
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "4.1.0-dev200427"
+#define PROGVERS               "4.1.0-dev200501"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -195,7 +195,7 @@ bool unsuppCmd = false;
 uint8_t MdebFifoLimit = 120;
 uint8_t bank = 0;
 uint16_t bankOffset = 0;
-uint8_t ccN = 0;
+//uint8_t ccN = 0;
 uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 - FIFO LaCrosse, 9 - FIFO mit Debug Ausgaben
 uint8_t radionr = defSelRadio;
 uint8_t radio_bank[4];
@@ -400,8 +400,6 @@ void setup() {
   	initEEPROM();
 #ifdef CMP_CC1101
 	MSG_PRINTLN(F("CCInit "));
-	uint8_t remRadionr = radionr;
-	uint8_t remBankOffset = bankOffset;
 	uint8_t statRadio;
 	for (radionr = 0; radionr < 4; radionr++) {		// init radio
 		statRadio = tools::EEread(addr_statRadio + radionr);
@@ -410,7 +408,7 @@ void setup() {
 			continue;
 		}
 		statRadio = radioDetekt(false, statRadio);
-		if (statRadio < 10) {
+		if (statRadio < 10) {				// ist dem Radio eine Bank zugeordnet?
 			bankOffset = getBankOffset(statRadio);
 			cc1101::CCinit_reg();
 		}
@@ -421,17 +419,14 @@ void setup() {
 		}
 	}
 	
-	if (radio_bank[remRadionr] < 10)
-	{
+//	if (radio_bank[remRadionr] < 10)
+//	{
 		musterDec.setRSSICallback(&cc1101::getRSSI);                    // Provide the RSSI Callback
-	} 
-	else
-		musterDec.setRSSICallback(&rssiCallback);	// Provide the RSSI Callback		
+//	} 
+//	else
+//		musterDec.setRSSICallback(&rssiCallback);	// Provide the RSSI Callback		
 #endif 
 
-	if (ccmode == 0) {
-		pinAsOutput(PIN_SEND);
-	}
 	if (musterDec.MdebEnabled) {
 		MSG_PRINTLN(F("Starting timerjob"));
 	}
@@ -444,8 +439,6 @@ void setup() {
 	MyTim->setOverflow(31*1000, MICROSEC_FORMAT);
 	MyTim->attachInterrupt(cronjob);
 	MyTim->resume();
-	
-	
 #else
 	Timer1.initialize(31*1000); //Interrupt wird jede 31 Millisekunden ausgeloest
 	Timer1.attachInterrupt(cronjob);
@@ -453,13 +446,17 @@ void setup() {
 	cmdstring.reserve(maxCmdString);
 
 	hasCC1101 = true;
-	uint8_t remccmode = ccmode;
+
 	for (radionr = 0; radionr < 4; radionr++) {	// enableReceive bei allen korrekt erkannten radios denen eine Bank zugeordnet ist
-		if (radio_bank[radionr] < 10) {
-			bankOffset = getBankOffset(radio_bank[radionr]);
+		statRadio = radio_bank[radionr];
+		if (statRadio < 10) {
+			bankOffset = getBankOffset(statRadio);
 			ccmode = tools::EEbankRead(addr_ccmode);
 			if (radionr != 1 || ccmode > 0 || cc1101::regCheck()) {
 				en_dis_receiver(true);
+				if (radionr == 1 && ccmode == 0) {
+					pinAsOutput(PIN_SEND);
+				}
 			}
 			else {
 				MSG_PRINT(F("cc1101 "));
@@ -467,11 +464,12 @@ void setup() {
 				MSG_PRINT(F(" is for OOK not correctly set. "));
 			}
 		}
+		else if (statRadio == 0x1F) {	// Init
+			RXenabled[radionr] = true;
+		}
 	}
 	MSG_PRINTLN("");
-	ccmode = remccmode;
-	bankOffset = remBankOffset;
-	radionr = remRadionr;
+	getSelRadioBank();
 }
 
 #ifdef MAPLE_Mini
@@ -585,6 +583,10 @@ void getRxFifo(uint16_t Boffs) {
 		if (LEDenabled) {
 			blinkLED=true;
 		}
+		if (ccmode == 4) {
+			cc1101::ccStrobe_SIDLE();	// start over syncing
+		}
+			
 		fifoBytes = cc1101::getRXBYTES(); // & 0x7f; // read len, transfer RX fifo
 		if (fifoBytes > 0) {
 			uint8_t marcstate;
@@ -628,14 +630,29 @@ void getRxFifo(uint16_t Boffs) {
 					}
 				}
 			}
-			marcstate = cc1101::getMARCSTATE();
-			if (ccmode == 9) {
-				MSG_PRINT(F(" M"));
-				MSG_PRINTLN(marcstate);
+			if (ccmode == 4) {
+				switch (cc1101::getMARCSTATE()) {
+					// RX_OVERFLOW
+				case 17:
+					// IDLE
+				case 1:
+					cc1101::ccStrobe_SFRX();	// Flush the RX FIFO buffer
+					cc1101::ccStrobe_SIDLE();	// Idle mode
+					cc1101::ccStrobe_SNOP();	// No operation
+					cc1101::ccStrobe_SRX();	// Enable RX
+					break;
+				}
 			}
-			if (marcstate == 17 || ccmode == 3) {	// RXoverflow oder LaCrosse?
-				if (cc1101::flushrx()) {		// Flush the RX FIFO buffer
-					cc1101::setReceiveMode();
+			else {
+				marcstate = cc1101::getMARCSTATE();
+				if (ccmode == 9) {
+					MSG_PRINT(F(" M"));
+					MSG_PRINTLN(marcstate);
+				}
+				if (marcstate == 17 || ccmode == 3) {	// RXoverflow oder LaCrosse?
+					if (cc1101::flushrx()) {		// Flush the RX FIFO buffer
+						cc1101::setReceiveMode();
+					}
 				}
 			}
 		}
@@ -681,7 +698,8 @@ void enableReceive() {
    }
    #ifdef CMP_CC1101
    if (hasCC1101 && ccmode < 15) {
-     cc1101::setIdleMode();
+     cc1101::ccStrobe_SIDLE();	// Idle mode
+     delay(1);
      cc1101::setReceiveMode();
    }
    #endif
@@ -693,7 +711,7 @@ void disableReceive() {
     detachInterrupt(digitalPinToInterrupt(PIN_RECEIVE));
   }
   #ifdef CMP_CC1101
-  if (hasCC1101) cc1101::setIdleMode();
+  if (hasCC1101) cc1101::ccStrobe_SIDLE();	// Idle mode
   #endif
   FiFo.flush();
 }
@@ -1230,7 +1248,7 @@ void cmd_bank()
 				MSG_PRINT(F("write "));
 			}
 			MSG_PRINT(F("set "));
-			ccN = tools::EEbankRead(addr_ccN);
+			//ccN = tools::EEbankRead(addr_ccN);
 			ccmode = tools::EEbankRead(addr_ccmode);
 			if (ccmode == 255) {
 				ccmode = 0;
@@ -1254,10 +1272,15 @@ void cmd_bank()
 		if (radio_bank[radionr] < 10) {
 			bank = radio_bank[radionr];
 			bankOffset = getBankOffset(bank);
-			ccN = tools::EEbankRead(addr_ccN);
+			//ccN = tools::EEbankRead(addr_ccN);
 			ccmode = tools::EEbankRead(addr_ccmode);
 			MSG_PRINT(F("switch to radio "));
 			MSG_WRITE(radionr + 'A');
+			if (cmdstring.charAt(posDigit) == 'W') {
+				tools::EEwrite(addr_selRadio, radionr);
+				tools::EEstore();
+				MSG_PRINT(F(" and write"));
+			}
 			MSG_PRINTLN("");
 		}
 		else {
@@ -1309,13 +1332,17 @@ void print_ccconf(uint16_t bankOffs)
 
 void print_Bank()
 {
+	uint8_t tmp_ccN = tools::EEbankRead(addr_ccN);
 	MSG_PRINT(F("r="));
 	MSG_WRITE('A' + radionr);
 	MSG_PRINT(F(" b="));
 	MSG_PRINT(bank);
-	if (ccN > 0) {
+	if (RXenabled[radionr] == false) {
+		MSG_PRINT(F(" rx=0"));
+	}
+	if (tmp_ccN > 0) {
 		MSG_PRINT(F(" N="));
-		MSG_PRINT(ccN);
+		MSG_PRINT(tmp_ccN);
 	}
 	MSG_PRINT(F(" ccmode="));
 	MSG_PRINT(ccmode);
@@ -1589,7 +1616,7 @@ void ccRegWrite()	// CW cc register write
 	uint8_t val;
 	uint8_t reg;
 	uint8_t i;
-	uint8_t tmp_ccN = 0;
+	uint8_t tmp_ccN = 0xFF;
 	uint8_t tmp_ccmode = 0xFF;
 	bool flag = false;
 	
@@ -1640,10 +1667,10 @@ void ccRegWrite()	// CW cc register write
 	MSG_PRINT(cmdstring); // echo
 	if (flag) {
 		MSG_PRINT(F(" ok"));
-		if (tmp_ccN > 0) {
+		if (tmp_ccN != 0xFF) {
 			MSG_PRINT(F(",N="));
 			MSG_PRINT(tmp_ccN);
-			ccN = tmp_ccN;
+			//ccN = tmp_ccN;
 		}
 		if (tmp_ccmode != 0xFF) {
 			//cc1101::setIdleMode();
@@ -1768,10 +1795,27 @@ void cmd_writePatable()
 
 void cmd_configFactoryReset()	// eC - initEEPROMconfig
 {
-         initEEPROMconfig();
-         callGetFunctions();
-         cc1101::CCinit();
-         setCCmode();
+	uint8_t statRadio;
+	
+	initEEPROMconfig();
+	callGetFunctions();
+	radionr = defSelRadio;
+	statRadio = tools::EEread(addr_statRadio + defSelRadio);
+	statRadio = radioDetekt(false, statRadio);
+	if (statRadio == 0) {				// ist dem Radio Bank 0 zugeordnet?
+		getSelRadioBank();
+		cc1101::CCinit_reg();
+		RXenabled[radionr] = true;
+		setCCmode();
+	}
+	else {
+		radio_bank[defSelRadio] = statRadio;
+		if (statRadio != tools::EEread(addr_statRadio + defSelRadio)) {
+			tools::EEwrite(addr_statRadio+radionr, defSelRadio);
+			tools::EEstore();
+		}
+		getSelRadioBank();
+	}
 }
 
 void cmd_ccFactoryReset()	// e<0-9>
@@ -1782,7 +1826,7 @@ void cmd_ccFactoryReset()	// e<0-9>
          cc1101::ccFactoryReset();
          cc1101::CCinit();
          tools::EEbankWrite(addr_ccN, 0);
-         ccN = 0;
+         //ccN = 0;
          ccmode = 0;
          tools::EEbankWrite(addr_ccmode, ccmode);
          setCCmode();
@@ -1977,9 +2021,9 @@ inline void configSET()
 	else if (n == 5) {			// maxnumpat
 		musterDec.cMaxNumPattern = val;
 	}
-	else if (n == CSccN) {			// ccN
-		ccN = val;
-	}
+//	else if (n == CSccN) {			// ccN
+//		ccN = val;
+//	}
 	else if (n == CSccmode) {			// ccmode
 		ccmode = val;
 		setCCmode();
@@ -1995,7 +2039,7 @@ inline void configSET()
 			musterDec.cMaxPulse = -maxPulse;
 		}
 	}
-	else {
+	else if (n != CSccN) {
 		unsuppCmd = true;
 	}
 }
@@ -2050,12 +2094,36 @@ inline void configRadio()
 				tools::EEwrite(addr_statRadio+radionr,stat);
 				tools::EEstore();
 				radio_bank[radionr] = stat;
+				RXenabled[radionr] = true;
 			}
 		}
 		else {	// disable
 			tools::EEwrite(addr_statRadio+radionr,0xFF);
 			tools::EEstore();
 			radio_bank[radionr] = 0xFF;
+			if (radionr == tools::EEread(addr_selRadio) && radionr != remRadionr) {	// wurde das im EEPROM gemerkte selektierte Radio deaktiviert und ist ungleich der aktuell selektierten
+				tools::EEwrite(addr_selRadio, remRadionr);
+				tools::EEstore();
+			}
+			if (radionr == remRadionr) {	// wurde das selektierte Radio deaktiviert?
+				remRadionr = 4;
+				radionr = 4;
+				do {
+					radionr--;
+					if (radio_bank[radionr] < 10) {	// ist Radio aktiv, dann merken
+						remRadionr = radionr;
+					}
+				} while (radionr > 0);
+				if (remRadionr == 4) {	// wurde kein aktives Radio gefunden?
+					remRadionr = defSelRadio;
+				}
+				tools::EEwrite(addr_selRadio, remRadionr);
+				tools::EEstore();
+				bank = radio_bank[remRadionr];
+				bankOffset = getBankOffset(bank);
+				//ccN = tools::EEbankRead(addr_ccN);
+				ccmode = tools::EEbankRead(addr_ccmode);
+			}
 		}
 		radionr = remRadionr;
 	}
@@ -2223,7 +2291,7 @@ inline void changeReceiver()
 
 	uint8_t remRadionr = radionr;
 	uint8_t remccmode = ccmode;
-	uint8_t remBankOffset = bankOffset;
+	uint16_t remBankOffset = bankOffset;
 	uint8_t ra;
 	uint8_t re;
 	radionr = 255;
@@ -2337,24 +2405,6 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     }
     musterDec.cMaxNumPattern = tools::EEread(CSetAddr[5]);
 
-    radionr = defSelRadio;
-    //radionr = tools::EEread(addr_selRadio);
-    if (radionr > 3) {
-      radionr = defSelRadio;
-    }
-    bank = radio_bank[radionr] & 15;
-    if (bank > 9) {
-      bank = 0;
-    }
-    bankOffset = getBankOffset(bank);
-    ccN = tools::EEbankRead(addr_ccN);
-    ccmode = tools::EEbankRead(addr_ccmode);
-    if (ccmode == 255) {
-       ccmode = 0;
-       tools::EEbankWrite(addr_ccmode, ccmode);
-       tools::EEstore();
-    }
-    ccmode = ccmode & 0x0F;
     high = tools::EEread(CSetAddr[CSet16]);
     musterDec.MuSplitThresh = tools::EEread(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
     high = tools::EEread(CSetAddr[CSet16+2]);
@@ -2367,6 +2417,28 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     if (musterDec.mcMinBitLen == 0) {
         musterDec.mcMinBitLen = mcMinBitLenDef;
     }
+}
+
+void getSelRadioBank(void)
+{
+    //radionr = defSelRadio;
+    radionr = tools::EEread(addr_selRadio);
+    if (radionr > 3) {
+      radionr = defSelRadio;
+    }
+    bank = radio_bank[radionr];
+    if (bank > 9) {
+      bank = 0;
+    }
+    bankOffset = getBankOffset(bank);
+    //ccN = tools::EEbankRead(addr_ccN);
+    ccmode = tools::EEbankRead(addr_ccmode);
+    if (ccmode == 255) {
+       ccmode = 0;
+       tools::EEbankWrite(addr_ccmode, ccmode);
+       tools::EEstore();
+    }
+    ccmode = ccmode & 0x0F;
 }
 
 void initEEPROMconfig(void)
@@ -2405,7 +2477,7 @@ void initEEPROM(void)
     //storeFunctions(1, 1, 1);    // Init EEPROM with all flags enabled
     #ifdef CMP_CC1101
        if (tools::EEread(EE_MAGIC_OFFSET) != VERSION_1) {  // ccFactoryReset nur wenn VERSION_1 nicht passt
-          cc1101::ccFactoryReset();
+          cc1101::ccFactoryReset();	// nur Bank 0
        }
     #endif
     tools::EEwrite(EE_MAGIC_OFFSET, VERSION_1);
