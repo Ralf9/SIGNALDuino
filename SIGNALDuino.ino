@@ -40,16 +40,18 @@
 
 #define MAPLE_SDUINO 1
 //#define MAPLE_CUL 1
-//#define LAN_WIZ 1
+#define LAN_WIZ 1
 //#define ARDUINO_ATMEGA328P_MINICUL 1
 //#define OTHER_BOARD_WITH_CC1101  1
 //#define CMP_MEMDBG 1
 
-// bitte auch das "#define LAN_WIZ 1" in der SignalDecoder.h beachten
+// *** bitte auch das "#define LAN_WIZ 1" in der SignalDecoder.h beachten ***
+// *** bitte auch das "#define LAN_WIZ 1" in der USBD_reenumerate.c beachten ***
+
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "4.1.0-dev200501"
+#define PROGVERS               "4.1.1-dev200503"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -144,11 +146,6 @@ SignalDetectorClass musterDec;
 #ifdef LAN_WIZ
   #include <SPI.h>
   #include <Ethernet.h>
-  
-  byte mac[] = { 0xDE, 0xAE, 0xBE, 0xEF, 0xF9, 0xE9 };
-  byte ip[] = { 192, 168, 0, 85 };
-  byte gateway[] = { 192, 168, 0, 191 };
-  byte subnet[] = { 255, 255, 255, 0 };
 
   EthernetServer server = EthernetServer(23);
   EthernetClient client;
@@ -181,6 +178,16 @@ SignalDetectorClass musterDec;
 #define addr_selRadio        0xEF
 //#define addr_bank            0xFD
 #define addr_features        0xFF
+// Ethernet EEProm Address
+#define EE_MAC_ADDR    0xC0
+#define EE_IP4_ADDR    0xC8
+#define EE_IP4_GATEWAY 0xCC
+#define EE_IP4_NETMASK 0xD0
+
+const uint8_t mac_def[] = { 0x00, 0x80, 0x41 };
+const uint8_t ip_def[] = { 192, 168, 0, 244 };
+const uint8_t gateway_def[] = { 192, 168, 0, 1 };
+const uint8_t netmask_def[] = { 255, 255, 255, 0 };
 
 volatile bool blinkLED = false;
 String cmdstring = "";
@@ -200,6 +207,11 @@ uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 
 uint8_t radionr = defSelRadio;
 uint8_t radio_bank[4];
 uint8_t ccBuf[4][ccMaxBuf];
+// Ethernet
+uint8_t mac[6];
+uint8_t ip[4];
+uint8_t gateway[4];
+uint8_t netmask[4];
 
 void cmd_help_S();
 void cmd_help();
@@ -347,11 +359,13 @@ void setup() {
 	digitalWrite(PIN_WIZ_RST, HIGH);
 #endif
 #endif
+tools::EEbufferFill();
+getEthernetConfig();
 #ifdef LAN_WIZ
 	digitalWrite(PIN_WIZ_RST, LOW);		// RESET should be heldlowat least 500 us for W5500
 	delayMicroseconds(500);
 	digitalWrite(PIN_WIZ_RST, HIGH);
-	Ethernet.begin(mac, ip, gateway, subnet);
+	Ethernet.begin(mac, ip, gateway, netmask);
 	server.begin();		// start listening for clients
 #else
 	Serial.begin(BAUDRATE);
@@ -1495,6 +1509,26 @@ void print_radio_sum()	// br - Bankinfo fuer alle cc1101 denen eine Bank zugeord
 	MSG_PRINTLN("");
 }
 
+void print_mac(uint8_t mac[])
+{
+	for (uint8_t i = 0; i < 6; i++) {
+		printHex2(mac[i]);
+		if (i < 5) {
+			MSG_PRINT(F(":"));
+		}
+	}
+}
+
+void print_ip(uint8_t ip[])
+{
+	for (uint8_t i = 0; i < 4; i++) {
+		MSG_PRINT(ip[i]);
+		if (i < 3) {
+			MSG_PRINT(F("."));
+		}
+	}
+}
+
 void cmd_Version()	// V: Version
 {
 	MSG_PRINT(F("V " PROGVERS " SIGNALduino "));
@@ -1704,9 +1738,27 @@ void cmd_writeEEPROM()	// write EEPROM und CC11001 register
 {
 	uint8_t val;
 	uint8_t reg;
+	bool ret = false;
 	
     if (cmdstring.charAt(1) == 'S' && cmdstring.charAt(2) == '3' && hasCC1101) {       // WS<reg>  Command Strobes
         cc1101::commandStrobes();
+    } else if (cmdstring.charAt(1) == 'i') {	// write ip
+        if (cmdstring.charAt(2) == 'a') {	// adress
+            ret = tools::cmdstringPos2ip(ip, 3, EE_IP4_ADDR);
+        }
+        else if (cmdstring.charAt(2) == 'g') {	// gateway
+            ret = tools::cmdstringPos2ip(gateway, 3, EE_IP4_GATEWAY);
+        }
+        else if (cmdstring.charAt(2) == 'n') {	// netmask
+            ret = tools::cmdstringPos2ip(netmask, 3, EE_IP4_NETMASK);
+        }
+        else {
+           unsuppCmd = true;
+           return;
+        }
+        if (ret == false) {
+           MSG_PRINTLN(F("incorrect"));
+        }
     } else if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2)) && isHexadecimalDigit(cmdstring.charAt(3)) && isHexadecimalDigit(cmdstring.charAt(4))) {
          reg = tools::cmdstringPos2int(1);
          val = tools::cmdstringPos2int(3);
@@ -1751,8 +1803,21 @@ void cmd_readEEPROM()	// R<adr>  read EEPROM
 			MSG_PRINT(F("  "));
 		}
 		MSG_PRINTLN("");
+		return;
 	}
-   else if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2))) {             // r<adr>  read EEPROM
+	if (cmdstring.charAt(1) == 'i') {	// print ethernet config
+		MSG_PRINT(F("mac = "));
+		print_mac(mac);
+		MSG_PRINT(F("    ip = "));
+		print_ip(ip);
+		MSG_PRINT(F("  gw = "));
+		print_ip(gateway);
+		MSG_PRINT(F("  nm = "));
+		print_ip(netmask);
+		MSG_PRINTLN("");
+		return;
+	}
+   if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2))) {             // r<adr>  read EEPROM
      uint8_t reg;
      uint16_t reg16;
      
@@ -1774,9 +1839,9 @@ void cmd_readEEPROM()	// R<adr>  read EEPROM
         printHex2(tools::EEread(reg16));
      }
      MSG_PRINTLN("");
-  } else {
-     unsuppCmd = true;
+     return;
   }
+     unsuppCmd = true;
 }
 
 void cmd_writePatable()
@@ -2439,6 +2504,43 @@ void getSelRadioBank(void)
        tools::EEstore();
     }
     ccmode = ccmode & 0x0F;
+}
+
+
+void getEthernetConfig(void)
+{
+	uint8_t i;
+	
+	if (tools::EEread(EE_MAC_ADDR) != mac_def[0] || tools::EEread(EE_MAC_ADDR+1) != mac_def[1] || tools::EEread(EE_MAC_ADDR+2) != mac_def[2]) {
+		initEthernetConfig();
+	}
+	
+	for (i = 0; i < 6; i++) {
+		mac[i] = tools::EEread(EE_MAC_ADDR+i);
+	}
+	for (i = 0; i < 4; i++) {
+		ip[i] = tools::EEread(EE_IP4_ADDR+i);
+		gateway[i] = tools::EEread(EE_IP4_GATEWAY+i);
+		netmask[i] = tools::EEread(EE_IP4_NETMASK+i);
+	}
+}
+
+void initEthernetConfig(void)
+{
+	for (uint8_t i = 0; i < 4; i++) {
+		tools::EEwrite(EE_IP4_ADDR+i,ip_def[i]);
+		tools::EEwrite(EE_IP4_GATEWAY+i,gateway_def[i]);
+		tools::EEwrite(EE_IP4_NETMASK+i,netmask_def[i]);
+	}
+	
+	tools::EEwrite(EE_MAC_ADDR, mac_def[0]);
+	tools::EEwrite(EE_MAC_ADDR+1, mac_def[1]);
+	tools::EEwrite(EE_MAC_ADDR+2, mac_def[2]);
+	uint32_t fserial = tools::flash_serial();
+	tools::EEwrite(EE_MAC_ADDR+3, (uint8_t)(fserial>>16 & 0xff));
+	tools::EEwrite(EE_MAC_ADDR+4, (uint8_t)(fserial>>8 & 0xff));
+	tools::EEwrite(EE_MAC_ADDR+5, (uint8_t)(fserial & 0xff));
+	tools::EEstore();
 }
 
 void initEEPROMconfig(void)

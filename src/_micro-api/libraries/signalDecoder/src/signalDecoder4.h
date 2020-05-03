@@ -41,7 +41,7 @@
 #define CMP_CC1101
 #define DEBUG 1
 
-//#define LAN_WIZ 1	// die Ausgabe ueber Ethernet funktioniert nur, wenn dies hier nochmals definiert wird
+#define LAN_WIZ 1	// die Ausgabe ueber Ethernet funktioniert nur, wenn dies hier nochmals definiert wird
 #include "output.h"
 #include "bitstore.h"
 #include "FastDelegate.h"

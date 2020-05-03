@@ -1,3 +1,6 @@
+#define LAN_WIZ 1
+
+#ifndef LAN_WIZ
 #include "usbd_if.h"
 #include "usbd_cdc_if.h"
 
@@ -27,6 +30,7 @@ void USBD_reenumerate(void)
   /*delay(USBD_ENUM_DELAY);*/
 #endif /* USB_DISC_PIN */
 #endif /* USBD_REENUM_DISABLED */
+#endif /* LAN_WIZ */
 }
 
 #endif
