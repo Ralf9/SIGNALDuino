@@ -343,6 +343,9 @@ namespace cc1101 {
          }
          MSG_PRINTLN("");
        }
+       else {
+         MSG_PRINTLN(F("error"));
+       }
      }
   }
 
@@ -377,20 +380,10 @@ namespace cc1101 {
              else {
                  MSG_PRINTLN("");
              }
+             return;
          }
      }
-  }
-
-
-  void writeCCreg(uint8_t reg, uint8_t var) {    // write CC1101 register
-
-    if (reg > 1 && reg < 0x40) {
-           writeReg(reg-2, var);
-           MSG_PRINT("W");
-           printHex2(reg);
-           printHex2(var);
-           MSG_PRINTLN("");
-    }
+     MSG_PRINTLN(F("error"));
   }
 
 
@@ -484,8 +477,6 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 	#ifndef MAPLE_Mini
 		digitalHigh(sckPin);
 		digitalLow(mosiPin);
-	#else
-		tools::EEbufferFill();
 	#endif
 	}
 

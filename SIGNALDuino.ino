@@ -40,7 +40,7 @@
 
 #define MAPLE_SDUINO 1
 //#define MAPLE_CUL 1
-#define LAN_WIZ 1
+//#define LAN_WIZ 1
 //#define ARDUINO_ATMEGA328P_MINICUL 1
 //#define OTHER_BOARD_WITH_CC1101  1
 //#define CMP_MEMDBG 1
@@ -51,7 +51,7 @@
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "4.1.1-dev200503"
+#define PROGVERS               "4.1.1-dev200504"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -199,6 +199,7 @@ bool LEDenabled = true;
 bool toggleBankEnabled = false;
 bool RXenabled[] = {false, false, false, false};	// true - enable receive, Zwischenspeicher zum enablereceive merken
 bool unsuppCmd = false;
+bool CmdOk = false;
 uint8_t MdebFifoLimit = 120;
 uint8_t bank = 0;
 uint16_t bankOffset = 0;
@@ -1166,6 +1167,7 @@ void HandleCommand()
 	}
 	//MSG_PRINT(i);
 	unsuppCmd = false;
+	CmdOk = false;
 	if (i < cmdAnz) {
 		//MSG_PRINT(F(" "));
 		//MSG_PRINT(cmd0[i]);
@@ -1179,6 +1181,9 @@ void HandleCommand()
 	
 	if (unsuppCmd) {
 		MSG_PRINTLN(F("Unsupported command"));
+	}
+	else if (CmdOk) {
+		MSG_PRINTLN(F("ok"));
 	}
 }
 
@@ -1532,6 +1537,9 @@ void print_ip(uint8_t ip[])
 void cmd_Version()	// V: Version
 {
 	MSG_PRINT(F("V " PROGVERS " SIGNALduino "));
+#ifdef LAN_WIZ
+	MSG_PRINT(F("LAN "));
+#endif
 	if (hasCC1101) {
 	    MSG_PRINT(F("cc1101 "));
 #ifdef PIN_MARK433
@@ -1665,9 +1673,14 @@ void ccRegWrite()	// CW cc register write
 			break;
 		}
 		val = tools::cmdstringPos2int(pos+2);
-		if (reg <= 0x28) {
+		if (reg <= 0x2F) {
 			cc1101::writeReg(reg,val);
-			reg += 2;
+			if (reg <= 0x28) {
+				reg += 2;
+			}
+			else {	// 0x29 - 0x2F nur fuer Testzwecke
+				reg = 0x2F;
+			}
 		}
 		else if (reg == addr_ccmode) {
 			tmp_ccmode = val;
@@ -1676,9 +1689,11 @@ void ccRegWrite()	// CW cc register write
 			tmp_ccN = val;
 		}
 		if (reg < 0x40) {
-			tools::EEbankWrite(reg, val);
-			if (reg == 0x37) {		// Ende der patable
-				cc1101::writePatable();
+			if (reg != 0x2F) {	// bei Testregister kein write
+				tools::EEbankWrite(reg, val);
+				if (reg == 0x37) {		// Ende der patable
+					cc1101::writePatable();
+				}
 			}
 		}
 		else {		// 0x40 - 0x47  Bank Kurzbeschreibung (max 8 Zeichen)
@@ -1759,19 +1774,28 @@ void cmd_writeEEPROM()	// write EEPROM und CC11001 register
         if (ret == false) {
            MSG_PRINTLN(F("incorrect"));
         }
+        else {
+          CmdOk = true;
+        }
     } else if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2)) && isHexadecimalDigit(cmdstring.charAt(3)) && isHexadecimalDigit(cmdstring.charAt(4))) {
          reg = tools::cmdstringPos2int(1);
          val = tools::cmdstringPos2int(3);
          if (reg < 0x40) {
            tools::EEbankWrite(reg, val);
+           if (reg > 1 && reg < 0x30) {
+             if (hasCC1101) {
+               cc1101::writeReg(reg-2, val);
+             }
+           }
          }
          else {   // ab 0x40 immer in Bank 0
            tools::EEwrite(reg, val);
          }
          tools::EEstore();
-         if (hasCC1101) {
-           cc1101::writeCCreg(reg, val);
-         }
+         MSG_PRINT("W");
+         printHex2(reg);
+         printHex2(val);
+         MSG_PRINTLN("");
     } else {
          unsuppCmd = true;
     }
@@ -2189,6 +2213,7 @@ inline void configRadio()
 				//ccN = tools::EEbankRead(addr_ccN);
 				ccmode = tools::EEbankRead(addr_ccmode);
 			}
+			CmdOk = true;
 		}
 		radionr = remRadionr;
 	}

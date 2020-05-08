@@ -1,4 +1,4 @@
-#define LAN_WIZ 1
+//#define LAN_WIZ 1
 
 #ifndef LAN_WIZ
 #include "usbd_if.h"
