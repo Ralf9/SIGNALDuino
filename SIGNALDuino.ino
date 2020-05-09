@@ -51,7 +51,7 @@
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "4.1.1-dev200504"
+#define PROGVERS               "4.1.1-dev200509"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -1510,6 +1510,9 @@ void print_radio_sum()	// br - Bankinfo fuer alle cc1101 denen eine Bank zugeord
 		MSG_PRINT(rccmode);
 	
 		print_ccconf(rbankoff);
+		if (i == radionr) {
+			MSG_PRINT(F("*"));
+		}
 	}
 	MSG_PRINTLN("");
 }
