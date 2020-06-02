@@ -41,6 +41,8 @@
 #define MAPLE_SDUINO 1
 //#define MAPLE_CUL 1
 //#define LAN_WIZ 1
+#define MAPLE_WATCHDOG 1
+
 //#define ARDUINO_ATMEGA328P_MINICUL 1
 //#define OTHER_BOARD_WITH_CC1101  1
 //#define CMP_MEMDBG 1
@@ -51,7 +53,7 @@
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "4.1.1-dev200509"
+#define PROGVERS               "4.1.1-dev200603"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -116,7 +118,10 @@
 
 #define DEBUG                  1
 
-#ifdef WATCHDOG
+#ifdef MAPLE_WATCHDOG
+	#include <IWatchdog.h>
+	bool watchRes = false;
+#elif WATCHDOG
 	#include <avr/wdt.h>
 #endif
 
@@ -383,7 +388,19 @@ getEthernetConfig();
 	if (musterDec.MdebEnabled) {
 		DBG_PRINTLN(F("Using sFIFO"));
 	}
-#ifdef WATCHDOG
+#ifdef MAPLE_WATCHDOG
+	if (IWatchdog.isReset(true)) {
+		MSG_PRINTLN(F("Watchdog caused a reset"));
+		watchRes = true;
+	}
+	else {
+		watchRes = false;
+	}
+	IWatchdog.begin(20000000);	// Init the watchdog timer with 20 seconds timeout
+	if (IWatchdog.isEnabled()) {
+		MSG_PRINTLN(F("Watchdog enabled"));
+	}
+#elif WATCHDOG
 	if (MCUSR & (1 << WDRF)) {
 		MSG_PRINTLN(F("Watchdog caused a reset"));
 	}
@@ -488,7 +505,11 @@ getEthernetConfig();
 }
 
 #ifdef MAPLE_Mini
+#if ARDUINO < 190
 void cronjob(HardwareTimer*) {
+#else
+void cronjob() {
+#endif
 	noInterrupts();
 #else
 void cronjob() {
@@ -547,7 +568,9 @@ void loop() {
 		  blinkLED=true;
 		}
 	}
-#ifdef WATCHDOG
+#ifdef MAPLE_WATCHDOG
+	IWatchdog.reload();
+#elif WATCHDOG
 	wdt_reset();
 #endif
 
@@ -1575,6 +1598,11 @@ void cmd_Version()	// V: Version
 	}
 	
 	MSG_PRINT(F(") "));
+#ifdef MAPLE_WATCHDOG
+	if (watchRes) {
+		MSG_PRINT(F("wr "));
+	}
+#endif
 	MSG_PRINTLN(F("- compiled at " __DATE__ " " __TIME__));
 }
 
