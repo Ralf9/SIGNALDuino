@@ -43,17 +43,20 @@
 //#define LAN_WIZ 1
 #define MAPLE_WATCHDOG 1
 
+//#define DEBUG_SERIAL 2	// debug level
+#define SerialNr USART1	// serial2 = USART2
+
 //#define ARDUINO_ATMEGA328P_MINICUL 1
 //#define OTHER_BOARD_WITH_CC1101  1
 //#define CMP_MEMDBG 1
 
 // *** bitte auch das "#define LAN_WIZ 1" in der SignalDecoder.h beachten ***
-// *** bitte auch das "#define LAN_WIZ 1" in der USBD_reenumerate.c beachten ***
+// *** nur bei core 1.8.0: bitte auch das "#define LAN_WIZ 1" in der USBD_reenumerate.c beachten ***
 
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "4.1.1-dev200603"
+#define PROGVERS               "4.1.1-dev200611"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -156,6 +159,12 @@ SignalDetectorClass musterDec;
   EthernetClient client;
 #endif
 
+#ifdef DEBUG_SERIAL
+  #include <HardwareSerial.h>
+
+  HardwareSerial HwSerial(SerialNr);
+#endif
+
 #define pulseMin  90
 
 #ifdef MAPLE_Mini
@@ -179,6 +188,8 @@ SignalDetectorClass musterDec;
 #define addr_ccN             0x3D
 #define addr_ccmode          0x3E
 //#define addr_featuresB       0x3F
+#define addr_rxRes           0xE9    // bei 0xA5 ist rx nach dem Reset disabled
+// #define addr              0xEA  res
 #define addr_statRadio       0xEB    // A=EB B=EC C=ED D=EE  Bit 0-3 Bank,  1F-Init, Bit 6 = 1 - Fehler bei Erkennung, Bit 6&7 = 1 - Miso Timeout, FF-deaktiviert
 #define addr_selRadio        0xEF
 //#define addr_bank            0xFD
@@ -213,6 +224,9 @@ uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 
 uint8_t radionr = defSelRadio;
 uint8_t radio_bank[4];
 uint8_t ccBuf[4][ccMaxBuf];
+#ifndef LAN_WIZ
+bool unsuppCmdEnable;
+#endif
 // Ethernet
 uint8_t mac[6];
 uint8_t ip[4];
@@ -280,7 +294,7 @@ void (*cmdFP[])(void) = {
 
 //const char *CSetCmd[] = {"fifolimit", "mcmbl", "mscnt", "maxMuPrintx256", "maxMsgSizex256", "maxnumpat", "ccN",    "ccmode", "muthresh", "L",  "maxpulse", "L"  };
 const uint8_t CSetAddr[] = {  0xf0,     0xf1,     0xf2,          0xf3,           0xf4,            0xf5,   addr_ccN, addr_ccmode,     0xf8,  0xf9,  0xfa,     0xfb };
-const uint8_t CSetDef[] =  {    120,       0,        4,             3,              4,               8,          0,           0,        0,     0,     0,        0 };
+const uint8_t CSetDef[] =  {    150,       0,        4,             3,              4,               8,          0,           0,        0,     0,     0,        0 };
 
 const char string_0[] PROGMEM = "fifolimit";
 const char string_1[] PROGMEM = "mcmbl";
@@ -367,23 +381,39 @@ void setup() {
 #endif
 tools::EEbufferFill();
 getEthernetConfig();
+pinAsOutput(PIN_LED);
 #ifdef LAN_WIZ
+	digitalWrite(PIN_LED, LOW);
 	digitalWrite(PIN_WIZ_RST, LOW);		// RESET should be heldlowat least 500 us for W5500
 	delayMicroseconds(500);
 	digitalWrite(PIN_WIZ_RST, HIGH);
 	Ethernet.begin(mac, ip, gateway, netmask);
 	server.begin();		// start listening for clients
 #else
+	if (tools::EEread(addr_rxRes) == 0xA5) {	// wenn A5 dann bleibt rx=0 und es gibt keine "Unsupported command" Meldungen
+		unsuppCmdEnable = false;
+	}
+	else {
+		unsuppCmdEnable = true;
+	}
+	digitalWrite(PIN_LED, HIGH);
+  #ifdef DEBUG_SERIAL
+	HwSerial.begin(BAUDRATE);
+  #endif
 	Serial.begin(BAUDRATE);
-	//while (!Serial) {
-	//	; // wait for serial port to connect. Needed for native USB
-	//}
-	for (uint8_t sw=0;sw<255;sw++ ) {
+	while (!Serial) {
+		; // wait for serial port to connect. Needed for native USB
+	}
+	/*for (uint8_t sw=0;sw<255;sw++ ) {
 		delay(10);
 		if (Serial) {
 			break;
 		}
-	}
+	}*/
+	digitalWrite(PIN_LED, LOW);
+#ifdef DEBUG_SERIAL
+	HwSerial.println(F("serial init ok"));
+#endif
 #endif
 	if (musterDec.MdebEnabled) {
 		DBG_PRINTLN(F("Using sFIFO"));
@@ -421,7 +451,6 @@ getEthernetConfig();
 #endif
 	//delay(2000);
 	pinAsInput(PIN_RECEIVE);
-	pinAsOutput(PIN_LED);
 	// CC1101
 #ifdef WATCHDOG
 	wdt_reset();
@@ -485,7 +514,9 @@ getEthernetConfig();
 			bankOffset = getBankOffset(statRadio);
 			ccmode = tools::EEbankRead(addr_ccmode);
 			if (radionr != 1 || ccmode > 0 || cc1101::regCheck()) {
-				en_dis_receiver(true);
+				if (tools::EEread(addr_rxRes) != 0xA5) {	// wenn A5 dann bleibt rx=0
+					en_dis_receiver(true);
+				}
 				if (radionr == 1 && ccmode == 0) {
 					pinAsOutput(PIN_SEND);
 				}
@@ -551,22 +582,22 @@ void loop() {
 	bool state;
 	uint8_t fifoCount;
 	
-#ifdef __AVR_ATmega32U4__
+/*#ifdef MAPLE_Mini
 	serialEvent();
-#endif
-#ifdef MAPLE_Mini
-	serialEvent();
-#endif
+#endif*/
 #ifdef LAN_WIZ
+	serialEvent();
 	ethernetLoop();
 #endif
-	if (command_available) {
+	if (command_available == true) {
 		command_available=false;
-		HandleCommand();
-		if (!command_available) { cmdstring = ""; }
-		if (LEDenabled) {
-		  blinkLED=true;
+		if (isAlpha(cmdstring.charAt(0)) || cmdstring.charAt(0) == '?') {
+			HandleCommand();
+			if (LEDenabled) {
+				blinkLED=true;
+			}
 		}
+		if (!command_available) { cmdstring = ""; }
 	}
 #ifdef MAPLE_WATCHDOG
 	IWatchdog.reload();
@@ -596,7 +627,6 @@ void loop() {
 			if (fifoCount > MdebFifoLimit) {
 					MSG_PRINT(F("MF="));
 					MSG_PRINTLN(fifoCount, DEC);
-					//MSG_PRINTLN("");
 			}
 		}
 		if (musterDec.printMsgSuccess && LEDenabled) {
@@ -1201,12 +1231,21 @@ void HandleCommand()
 		unsuppCmd = true;
 	}
 	//MSG_PRINTLN("");
-	
+#ifndef LAN_WIZ
+	if (unsuppCmd && unsuppCmdEnable) {
+#else
 	if (unsuppCmd) {
+#endif
 		MSG_PRINTLN(F("Unsupported command"));
+#ifdef DEBUG_SERIAL
+		HwSerial.println(F("wr: Unsupported command"));
+#endif
 	}
 	else if (CmdOk) {
 		MSG_PRINTLN(F("ok"));
+#ifdef DEBUG_SERIAL
+		HwSerial.println(F("wr: ok"));
+#endif
 	}
 }
 
@@ -1603,6 +1642,9 @@ void cmd_Version()	// V: Version
 		MSG_PRINT(F("wr "));
 	}
 #endif
+	if (tools::EEread(addr_rxRes) == 0xA5) {
+		MSG_PRINT(F("irx0 "));
+	}
 	MSG_PRINTLN(F("- compiled at " __DATE__ " " __TIME__));
 }
 
@@ -1640,7 +1682,7 @@ void cmd_uptime()	// t: Uptime
 
 void cmd_toggleBank()	// T<bank><sec>
 {
-	uint8_t setBank;
+	/*uint8_t setBank;
 	uint8_t sec;
 	uint16_t bankOffs;
 	
@@ -1677,9 +1719,9 @@ void cmd_toggleBank()	// T<bank><sec>
 		MSG_PRINT(F(" sec="));
 		MSG_PRINTLN(sec * 10);
 	}
-	else {
+	else {*/
 		unsuppCmd = true;
-	}
+//	}
 	
 }
 
@@ -2176,8 +2218,8 @@ inline uint8_t radioDetekt(bool confmode, uint8_t Dstat)
 		ver = cc1101::getCCVersion();
 		MSG_PRINT(F(": Partn="));
 		MSG_PRINT(pn);
-		MSG_PRINT(F(" Ver="));
-		MSG_PRINT(ver);
+		MSG_PRINT(F(" Ver=0x"));
+		printHex2(ver);
 		if (pn == 0 && ver > 0 && ver < 0xFF) {
 			MSG_PRINTLN("");
 			if (confmode) {
@@ -2275,25 +2317,49 @@ void serialEvent()
 {
   while (MSG_PRINTER.available())
   {
-    char inChar = (char)MSG_PRINTER.read(); 
-    switch(inChar)
-    {
-    case '\n':
-    case '\r':
-    case '\0':
-    case '#':
+	char inChar = (char)MSG_PRINTER.read();
+   #if DEBUG_SERIAL > 1
+	if ((uint8_t)inChar < 32 || (uint8_t)inChar > 126) {
+		HwSerial.print(F(" 0x"));
+		if ((((uint8_t)inChar) < 16)) {
+			HwSerial.print(F("0"));
+		}
+		HwSerial.print((uint8_t)inChar, HEX);
+		HwSerial.print(F(" "));
+	}
+	else {
+		HwSerial.print(inChar);
+	}
+   #endif
+	switch(inChar)
+	{
+	case '\n':
+	case '\r':
+	case '\0':
+	//case '~':
+	case '#':
+	   #if DEBUG_SERIAL > 1
+		HwSerial.println("");
+	   #endif
+	   #if DEBUG_SERIAL
+		HwSerial.print("cmd(");
+		HwSerial.print(cmdstring.length());
+		HwSerial.print(") = ");
+		HwSerial.println(cmdstring);
+	   #endif
 		command_available=true;
 		break;
-    default:
-      cmdstring += inChar;
-    }
-    if (cmdstring.length() > maxCmdString)
-    {
-	cmdstring = "";				// todo die restlichen Zeichen ignorieren
-	MSG_PRINT(F("cmd to long! (max "));
-	MSG_PRINT(maxCmdString);
-	MSG_PRINTLN(F(")"));
-    }
+	default:
+		cmdstring += inChar;
+	}
+	
+	if (cmdstring.length() > maxCmdString)
+	{
+		cmdstring = "";				// todo die restlichen Zeichen ignorieren
+		MSG_PRINT(F("cmd to long! (max "));
+		MSG_PRINT(maxCmdString);
+		MSG_PRINTLN(F(")"));
+	}
   }
 }
 
@@ -2421,9 +2487,28 @@ inline void changeReceiver()
 		ra = radionr;
 		re = radionr+1;
 	}
+
 	else {	// alle radio
+	  #ifndef LAN_WIZ	// nur bei serial wird bei XE die "Unsupported Command" Meldung aktiviert
+		if (cmdstring.charAt(1) == 'E') {
+			unsuppCmdEnable = true;
+		}
+	  #endif
 		ra = 0;
 		re = 4;
+	}
+	if (cmdstring.charAt(2) == 'W') {
+		if (cmdstring.charAt(1) == 'E') {
+			tools::EEwrite(addr_rxRes, 0xFF);
+			MSG_PRINTLN(F("write rx=1"));
+		}
+		else {
+			tools::EEwrite(addr_rxRes, 0xA5);	// nach einem Reset bleibt rx=0
+			MSG_PRINTLN(F("write rx=0"));
+		}
+		tools::EEstore();
+		radionr = remRadionr;
+		return;
 	}
 	for (radionr = ra; radionr < re; radionr++) {
 		if (radio_bank[radionr] > 9) {	// radio nicht aktiv
@@ -2616,6 +2701,7 @@ void initEEPROMconfig(void)
 	radio_bank[3] = defStatRadio;
 	tools::EEwrite(addr_selRadio, defSelRadio);
 	//tools::EEwrite(addr_bank, 0);
+	tools::EEwrite(addr_rxRes, 0xFF);
 	tools::EEstore();
 	MSG_PRINTLN(F("Init eeprom to defaults"));
 }
