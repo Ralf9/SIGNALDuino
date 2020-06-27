@@ -42,6 +42,11 @@
 #define DEBUG 1
 
 //#define LAN_WIZ 1	// die Ausgabe ueber Ethernet funktioniert nur, wenn dies hier nochmals definiert wird
+//#define DEBUG_BackupReg 1
+#ifdef DEBUG_BackupReg
+	#include <backup.h>
+#endif
+
 #include "output.h"
 #include "bitstore.h"
 #include "FastDelegate.h"
@@ -50,6 +55,7 @@
 #define defMaxMsgSize 1500 //2000
 #define defMsMaxMsgSize 254
 #define minMessageLen 40
+#define maxMCmstart 254
 #define syncMinFact 6
 #define syncMaxFact 45 // 39
 #define syncMaxMicros 17000
@@ -173,7 +179,9 @@ public:
 
 	bool checkMBuffer();
 	bool isMuMessageRepeat();
-
+#ifdef DEBUG_BackupReg
+	void setBackupRegSD(uint32_t n);
+#endif
 };
 
 class ManchesterpatternDecoder
@@ -200,7 +208,7 @@ public:
 	int8_t shorthigh;
 	int16_t clock; // Manchester calculated clock		
 	int8_t minbitlen;
-	uint8_t mc_sync_pos;
+	uint16_t mc_sync_pos;
 	
 	bool mc_start_found = false;
 

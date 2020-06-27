@@ -43,6 +43,7 @@
 //#define LAN_WIZ 1
 #define MAPLE_WATCHDOG 1
 
+//#define DEBUG_BackupReg 1  // bitte auch das "#define DEBUG_BackupReg 1" in der SignalDecoder.h beachten
 //#define DEBUG_SERIAL 2	// debug level
 #define SerialNr USART1	// serial2 = USART2
 
@@ -56,7 +57,7 @@
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "4.1.1-dev200611"
+#define PROGVERS               "4.1.1-dev200627"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -64,9 +65,6 @@
 	#define CMP_CC1101
 #endif
 #ifdef ARDUINO_ATMEGA328P_MINICUL
-	#define CMP_CC1101
-#endif
-#ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
 	#define CMP_CC1101
 #endif
 #ifdef MAPLE_SDUINO
@@ -128,6 +126,12 @@
 	#include <avr/wdt.h>
 #endif
 
+#ifdef DEBUG_BackupReg
+	#include <backup.h>
+	uint8_t sichBackupReg = 0;
+#endif
+
+
 //---------------------------------------------------------------------------------------------
 
 #include "cc1101.h"
@@ -184,10 +188,11 @@ SignalDetectorClass musterDec;
 #define defStatRadio 0xFF
 // EEProm Address
 #define EE_MAGIC_OFFSET      0
-#define addr_togglesec       0x3C
+//#define addr_togglesec       0x3C
 #define addr_ccN             0x3D
 #define addr_ccmode          0x3E
 //#define addr_featuresB       0x3F
+#define addr_bankdescr       0x40    // 0x40-0x47 bis Bank 9 0x88-0x8F  # Bank 0 bis Bank 9, Kurzbeschreibungen (max 8 Zeichen)
 #define addr_rxRes           0xE9    // bei 0xA5 ist rx nach dem Reset disabled
 // #define addr              0xEA  res
 #define addr_statRadio       0xEB    // A=EB B=EC C=ED D=EE  Bit 0-3 Bank,  1F-Init, Bit 6 = 1 - Fehler bei Erkennung, Bit 6&7 = 1 - Miso Timeout, FF-deaktiviert
@@ -249,7 +254,7 @@ void cmd_readEEPROM();
 void cmd_freeRam();
 void cmd_send();
 void cmd_uptime();
-void cmd_toggleBank();
+void cmd_test();
 void cmd_Version();
 void cmd_writeEEPROM();
 void cmd_writePatable();
@@ -278,7 +283,7 @@ void (*cmdFP[])(void) = {
 		cmd_freeRam,	// R
 		cmd_send,	// S
 		cmd_uptime,	// t
-		cmd_toggleBank, // T
+		cmd_test, // T
 		cmd_Version,	// V
 		cmd_writeEEPROM,// W
 		cmd_writePatable,// x
@@ -379,6 +384,9 @@ void setup() {
 	digitalWrite(PIN_WIZ_RST, HIGH);
 #endif
 #endif
+#ifdef DEBUG_BackupReg
+	sichBackupReg = (uint8_t)getBackupRegister(RTC_BKP_INDEX);
+#endif
 tools::EEbufferFill();
 getEthernetConfig();
 pinAsOutput(PIN_LED);
@@ -414,6 +422,11 @@ pinAsOutput(PIN_LED);
 #ifdef DEBUG_SERIAL
 	HwSerial.println(F("serial init ok"));
 #endif
+#endif
+#ifdef DEBUG_BackupReg
+	MSG_PRINT(F("BackupReg = "));
+	MSG_PRINTLN(sichBackupReg);
+	setBackupReg(0);
 #endif
 	if (musterDec.MdebEnabled) {
 		DBG_PRINTLN(F("Using sFIFO"));
@@ -577,6 +590,15 @@ void cronjob() {
 }
 
 
+#ifdef DEBUG_BackupReg
+void setBackupReg(uint32_t n) {
+	enableBackupDomain();
+	setBackupRegister(RTC_BKP_INDEX, n);
+	disableBackupDomain();
+}
+#endif
+
+
 void loop() {
 	static int16_t aktVal=0;
 	bool state;
@@ -648,6 +670,9 @@ void getRxFifo(uint16_t Boffs) {
 	bool dup;		// true bei identischen Wiederholungen bei readRXFIFO
 
 	if (isHigh(pinReceive[radionr])) {  // wait for CC1100_FIFOTHR given bytes to arrive in FIFO
+#ifdef DEBUG_BackupReg
+	setBackupReg(1);
+#endif
 		if (LEDenabled) {
 			blinkLED=true;
 		}
@@ -724,6 +749,9 @@ void getRxFifo(uint16_t Boffs) {
 				}
 			}
 		}
+#ifdef DEBUG_BackupReg
+	setBackupReg(2);
+#endif
 	}
 }
 
@@ -1019,20 +1047,20 @@ void send_cmd()
 			command[cmdNo].datastart = startdata;
 			command[cmdNo].dataend = start_pos-2;
 #ifdef DEBUGSENDCMD
-			MSG_PRINT("D=");
+			MSG_PRINT(F("D="));
 			MSG_PRINTLN(cmdstring.substring(startdata, start_pos-1));
 #endif
 		} else if (msg_cmd0 == 'C') {
 			command[cmdNo].sendclock = cmdstring.substring(startdata, start_pos-1).toInt();
 			extraDelay = true;
 #ifdef DEBUGSENDCMD
-			MSG_PRINT("C=");
+			MSG_PRINT(F("C="));
 			MSG_PRINTLN(command[cmdNo].sendclock);
 #endif
 		} else if (msg_cmd0 == 'F') {
 			ccParamAnz = (start_pos - startdata) / 2;
 #ifdef DEBUGSENDCMD
-			MSG_PRINT("F=");
+			MSG_PRINT(F("F="));
 #endif
 			if (ccParamAnz > 0 && ccParamAnz <= 5 && hasCC1101 && ccmode == 0) {
 				uint8_t hex;
@@ -1211,6 +1239,9 @@ void HandleCommand()
 //	uint8_t val;
 	uint8_t i;
 	
+#ifdef DEBUG_BackupReg
+	setBackupReg(8);
+#endif
 	for (i=0; i < cmdAnz; i++) {
 		if (cmdstring.charAt(0) == cmd0[i]) {
 			if (cmd1[i] == ' ' || (cmdstring.charAt(1) == cmd1[i])) {
@@ -1247,6 +1278,9 @@ void HandleCommand()
 		HwSerial.println(F("wr: ok"));
 #endif
 	}
+#ifdef DEBUG_BackupReg
+	setBackupReg(9);
+#endif
 }
 
 
@@ -1507,7 +1541,7 @@ void print_bank_sum()	// bs - Banksummary
 			}
 			else {
 				for (j = 0; j < 8; j++) {
-					ch = tools::EEread(0x40 + (i * 8) + j);
+					ch = tools::EEread(addr_bankdescr + (i * 8) + j);
 					if ((ch >= 32 && ch <= 122) || ch == 0) {	// space to z
 						bankStr[j] = ch;
 						if (ch == 0) {	// end
@@ -1645,6 +1679,10 @@ void cmd_Version()	// V: Version
 	if (tools::EEread(addr_rxRes) == 0xA5) {
 		MSG_PRINT(F("irx0 "));
 	}
+#ifdef DEBUG_BackupReg
+	MSG_PRINT(F("-"));
+	MSG_PRINT(sichBackupReg,HEX);
+#endif
 	MSG_PRINTLN(F("- compiled at " __DATE__ " " __TIME__));
 }
 
@@ -1680,49 +1718,9 @@ void cmd_uptime()	// t: Uptime
 	MSG_PRINTLN(getUptime());
 }
 
-void cmd_toggleBank()	// T<bank><sec>
+void cmd_test()
 {
-	/*uint8_t setBank;
-	uint8_t sec;
-	uint16_t bankOffs;
-	
-	if (cmdstring.charAt(1) == '?') {
-		MSG_PRINT(F("Toggle="));
-		for (uint8_t i = 0; i <= 9; i++) {
-			bankOffs = getBankOffset(i);
-			MSG_PRINT(F(" "));
-			sec = tools::EEbankRead(addr_togglesec);
-			if (sec > 99) {
-				sec = 0;
-				tools::EEbankWrite(addr_togglesec, sec);
-				tools::EEstore();
-			}
-			MSG_PRINT(sec * 10);
-		}
-		MSG_PRINTLN("");
-	}
-	else if (isDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2)) && isDigit(cmdstring.charAt(3))) {
-		uint8_t high;
-		uint8_t digit;
-		
-		setBank = (uint8_t)cmdstring.charAt(1);
-		setBank = tools::hex2int(setBank);
-		bankOffs = getBankOffset(setBank);
-		MSG_PRINT(F("setToggle b="));
-		MSG_PRINTLN(setBank);
-		digit = (uint8_t)cmdstring.charAt(2);
-		high = tools::hex2int(digit);
-		digit = (uint8_t)cmdstring.charAt(3);
-		sec = high * 10 + tools::hex2int(digit);
-		tools::EEbankWrite(addr_togglesec, sec);
-		tools::EEstore();
-		MSG_PRINT(F(" sec="));
-		MSG_PRINTLN(sec * 10);
-	}
-	else {*/
-		unsuppCmd = true;
-//	}
-	
+	unsuppCmd = true;
 }
 
 void ccRegWrite()	// CW cc register write
@@ -2082,9 +2080,9 @@ inline void configCMD()
   }
   else if (cmdstring.charAt(2) == 'C') {  //MC
 	bptr=&musterDec.MCenabled;
-  }
-  else if (cmdstring.charAt(2) == 'R') {  //Mreduce
-	bptr=&musterDec.MredEnabled;
+// }
+// else if (cmdstring.charAt(2) == 'R') {  //Mreduce
+//   bptr=&musterDec.MredEnabled;
   }
   else if (cmdstring.charAt(2) == 'D') {  //Mdebug
 	bptr=&musterDec.MdebEnabled;
@@ -2342,9 +2340,9 @@ void serialEvent()
 		HwSerial.println("");
 	   #endif
 	   #if DEBUG_SERIAL
-		HwSerial.print("cmd(");
+		HwSerial.print(F("cmd("));
 		HwSerial.print(cmdstring.length());
-		HwSerial.print(") = ");
+		HwSerial.print(F(") = "));
 		HwSerial.println(cmdstring);
 	   #endif
 		command_available=true;
