@@ -742,6 +742,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					MSG_PRINT("DMC");
 					MSG_PRINT(SERIAL_DELIMITER);
 
+					calcHisto();
 					for (uint8_t idx = 0; idx < patternLen; idx++)
 					{
 						if (idx > 4 && histo[idx] == 0) continue;

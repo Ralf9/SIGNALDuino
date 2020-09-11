@@ -53,7 +53,7 @@
 
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.4.0-dev200130"
+#define PROGVERS               "3.3.4-dev200627"
 #define VERSION_1               0x33
 #define VERSION_2               0x40
 
@@ -115,7 +115,7 @@ SignalDetectorClass musterDec;
 
 // EEProm Address
 #define EE_MAGIC_OFFSET      0
-#define addr_togglesec       0x3C
+//#define addr_togglesec       0x3C
 #define addr_ccN             0x3D
 #define addr_ccmode          0x3E
 //#define addr_featuresB       0x3F
@@ -135,7 +135,7 @@ bool unsuppCmd = false;
 uint8_t MdebFifoLimit = 120;
 uint8_t bank = 0;
 uint16_t bankOffset = 0;
-uint8_t ccN = 0;
+//uint8_t ccN = 0;
 uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 - FIFO LaCrosse, 9 - FIFO mit Debug Ausgaben
 uint8_t ccBuf[ccMaxBuf];
 
@@ -154,7 +154,7 @@ void cmd_readEEPROM();
 void cmd_freeRam();
 void cmd_send();
 void cmd_uptime();
-void cmd_toggleBank();
+void cmd_test();
 void cmd_Version();
 void cmd_writeEEPROM();
 void cmd_writePatable();
@@ -182,7 +182,7 @@ void (*cmdFP[])(void) = {
 		cmd_freeRam,	// R
 		cmd_send,	// S
 		cmd_uptime,	// t
-		cmd_toggleBank, // T
+		cmd_test, // T
 		cmd_Version,	// V
 		cmd_writeEEPROM,// W
 		cmd_writePatable,// x
@@ -456,6 +456,7 @@ void loop() {
 		fifoBytes = cc1101::getRXBYTES(); // & 0x7f; // read len, transfer RX fifo
 		if (fifoBytes > 0) {
 			uint8_t marcstate;
+			uint8_t RSSI = cc1101::getRSSI();
 			
 			if (ccmode == 9) {
 				MSG_PRINT(F("RX("));
@@ -482,10 +483,13 @@ void loop() {
 						MSG_PRINT(F(")"));
 					}
 					else {
-						if (ccN > 0) {
+						uint8_t n = EEPROM.read(bankOffset + addr_ccN);
+						if (n > 0) {
 							MSG_PRINT(F(";N="));
-							MSG_PRINT(ccN);
+							MSG_PRINT(n);
 						}
+						MSG_PRINT(F(";R="));
+						MSG_PRINT(RSSI);
 						MSG_PRINT(F(";"));
 						MSG_PRINT(MSG_END);
 						MSG_PRINT("\n");
@@ -993,7 +997,7 @@ void cmd_bank()
 				MSG_PRINT(F("write "));
 			}
 			MSG_PRINT(F("set "));
-			ccN = EEPROM.read(bankOffset + addr_ccN);
+			//ccN = EEPROM.read(bankOffset + addr_ccN);
 			ccmode = EEPROM.read(bankOffset + addr_ccmode);
 			if (ccmode == 255) {
 				ccmode = 0;
@@ -1014,6 +1018,9 @@ void cmd_bank()
 	else if (cmdstring.charAt(0) == 'b' && (cmdstring.length() == 1 || cmdstring.charAt(1) == '?')) {
 		print_Bank();
 	}
+	else if (cmdstring.charAt(1) == 's') {
+		print_bank_sum();
+	}
 	else {
 		unsuppCmd = true;
 	}
@@ -1031,28 +1038,134 @@ uint16_t getBankOffset(uint8_t tmpBank)
 	return bankOffs;
 }
 
-void print_Bank()
+void print_ccconf(uint16_t bankOffs)
 {
 	char hexString[6];
 	
+	MSG_PRINT(F(" sync="));
+	printHex2(EEPROM.read(bankOffs + 2 + CC1101_SYNC1));
+	printHex2(EEPROM.read(bankOffs + 2 + CC1101_SYNC0));
+	MSG_PRINT(F(" ccconf="));
+	for (uint8_t i = 0x0F; i <= 0x1F; i++) {
+		printHex2(EEPROM.read(bankOffs + i));
+	}
+	MSG_PRINT(F(" boffs="));
+	sprintf(hexString, "%04X", bankOffs);
+	MSG_PRINT(hexString);
+}
+
+void print_Bank()
+{
+	uint8_t tmp_ccN = EEPROM.read(bankOffset + addr_ccN);
+	
 	MSG_PRINT(F("b="));
 	MSG_PRINT(bank);
-	if (ccN > 0) {
+	if (tmp_ccN > 0) {
 		MSG_PRINT(F(" N="));
-		MSG_PRINT(ccN);
+		MSG_PRINT(tmp_ccN);
 	}
 	MSG_PRINT(F(" ccmode="));
 	MSG_PRINT(ccmode);
-	MSG_PRINT(F(" sync="));
-	printHex2(EEPROM.read(bankOffset + 2 + CC1101_SYNC1));
-	printHex2(EEPROM.read(bankOffset + 2 + CC1101_SYNC0));
-	MSG_PRINT(F(" ccconf="));
-	for (uint8_t i = 0x0F; i <= 0x1F; i++) {
-		printHex2(EEPROM.read(bankOffset + i));
+	
+	print_ccconf(bankOffset);
+	MSG_PRINTLN("");
+}
+
+void print_bank_sum()	// bs - Banksummary
+{
+	char bankStr[23];
+	char Nstr[23];
+	char ccmodeStr[23];
+	uint16_t sBankoff;
+	uint8_t sCcmode;
+	uint8_t i;
+	uint8_t i2;
+	uint8_t j;
+	
+	for (i = 0; i <= 9; i++) {
+		i2 = i * 2;
+		bankStr[i2] = '0' + i;
+		bankStr[i2+1] = ' ';
+		
+		sBankoff = getBankOffset(i);
+		if ((EEPROM.read(sBankoff) == i && EEPROM.read(sBankoff+1) == (255 - i)) || i == 0) {
+			Nstr[i2] = '0' + EEPROM.read(sBankoff + addr_ccN);
+			sCcmode = EEPROM.read(sBankoff + addr_ccmode);
+			if (sCcmode < 10) {
+				ccmodeStr[i2] = '0' + sCcmode;
+			}
+			else {
+				ccmodeStr[i2] = 'A' + sCcmode - 10;
+			}
+		}
+		else {
+			Nstr[i2] = '-';
+			ccmodeStr[i2] = '-';
+		}
+		Nstr[i2+1] = ' ';
+		ccmodeStr[i2+1] = ' ';
 	}
-	MSG_PRINT(F(" boffs="));
-	sprintf(hexString, "%04X", bankOffset);
-	MSG_PRINTLN(hexString);
+	bankStr[20] = 0;
+	Nstr[20] = 0;
+	ccmodeStr[20] = 0;
+	
+	MSG_PRINT(F("Bank__ "));
+	MSG_PRINT(bankStr);
+	MSG_PRINT(F(" Radio_ "));
+	for (i = 0; i <= 9; i++) {
+		i2 = i * 2;
+		if (i != bank) {
+			bankStr[i2] = '-';
+		}
+		else {
+			bankStr[i2] = '*';
+		}
+		bankStr[i2+1] = ' ';
+	}
+	bankStr[20] = 0;
+	MSG_PRINT(bankStr);
+	MSG_PRINT(F(" N_____ "));
+	MSG_PRINT(Nstr);
+	MSG_PRINT(F(" ccmode "));
+	MSG_PRINT(ccmodeStr);
+	MSG_PRINT(F("  "));
+	
+	uint8_t ch;
+	for (i = 0; i <= 9; i++) {
+		i2 = i * 2;	
+		if (Nstr[i2] != '-') {		// Bank Aktiv?
+			if (ccmodeStr[i2] == '0') {
+				strcpy(bankStr, "SlowRF");
+				j = 6;
+			}
+			else {
+				for (j = 0; j < 8; j++) {
+					ch = EEPROM.read(0x40 + (i * 8) + j);
+					if ((ch >= 32 && ch <= 122) || ch == 0) {	// space to z
+						bankStr[j] = ch;
+						if (ch == 0) {	// end
+							break;
+						}
+					}
+					else {	// kein gueltiges Zeichen
+						j = 0;
+						break;
+					}
+				}
+			}
+			if (j > 3) {
+				bankStr[8] = 0;
+				MSG_PRINT(F(" "));
+				MSG_PRINT(i);		// BankNr
+				MSG_PRINT(F(" - "));
+				MSG_PRINT(bankStr);
+				MSG_PRINT(F(" "));
+			}
+		}
+	}
+	MSG_PRINTLN("");
+		
+	//	Bank__ 0 1 2 3 4 5 6 7 8 9  Radio_ B A - C - - - - - -  N_____ 0 0 2 3 4 - - - - -  ccmode 0 3 3 3 2 - - - - -
 }
 
 void cmd_Version()	// V: Version
@@ -1104,47 +1217,9 @@ void cmd_uptime()	// t: Uptime
 	MSG_PRINTLN(getUptime());
 }
 
-void cmd_toggleBank()	// T<bank><sec>
+void cmd_test()	// T<bank><sec>
 {
-	uint8_t setBank;
-	uint8_t sec;
-	uint16_t bankOffs;
-	
-	if (cmdstring.charAt(1) == '?') {
-		MSG_PRINT(F("Toggle="));
-		for (uint8_t i = 0; i <= 9; i++) {
-			bankOffs = getBankOffset(i);
-			MSG_PRINT(F(" "));
-			sec = EEPROM.read(bankOffs + addr_togglesec);
-			if (sec > 99) {
-				sec = 0;
-				EEPROM.write(bankOffs + addr_togglesec, sec);
-			}
-			MSG_PRINT(sec * 10);
-		}
-		MSG_PRINTLN("");
-	}
-	else if (isDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2)) && isDigit(cmdstring.charAt(3))) {
-		uint8_t high;
-		uint8_t digit;
-		
-		setBank = (uint8_t)cmdstring.charAt(1);
-		setBank = cc1101::hex2int(setBank);
-		bankOffs = getBankOffset(setBank);
-		MSG_PRINT(F("setToggle b="));
-		MSG_PRINTLN(setBank);
-		digit = (uint8_t)cmdstring.charAt(2);
-		high = cc1101::hex2int(digit);
-		digit = (uint8_t)cmdstring.charAt(3);
-		sec = high * 10 + cc1101::hex2int(digit);
-		EEPROM.write(bankOffs + addr_togglesec, sec);
-		MSG_PRINT(F(" sec="));
-		MSG_PRINTLN(sec * 10);
-	}
-	else {
 		unsuppCmd = true;
-	}
-	
 }
 
 void ccRegWrite()	// CW cc register write
@@ -1164,19 +1239,36 @@ void ccRegWrite()	// CW cc register write
 			break;
 		}
 		reg = cmdstringPos2int(pos);
-		if (reg > 0x3F) {
+		if (reg > 0x47) {
 			break;
 		}
 		val = cmdstringPos2int(pos+2);
-		if (reg <= 0x28) {
+		if (reg <= 0x2F) {
 			cc1101::writeReg(reg,val);
-			reg += 2;
+			if (reg <= 0x28) {
+				reg += 2;
+			}
+			else {	// 0x29 - 0x2F nur fuer Testzwecke
+				reg = 0x2F;
+			}
 		}
 		else if (reg == addr_ccmode) {
 			tmp_ccmode = val;
 		}
 		else if (reg == addr_ccN) {
 			tmp_ccN = val;
+		}
+		if (reg < 0x40) {
+			if (reg != 0x2F) {	// bei Testregister kein write
+				EEPROM.write(bankOffset + reg, val);
+				if (reg == 0x37) {		// Ende der patable
+					cc1101::writePatable();
+				}
+			}
+		}
+		else {		// 0x40 - 0x47  Bank Kurzbeschreibung (max 8 Zeichen)
+			reg = reg + (bank * 8);
+			EEPROM.write(reg, val);
 		}
 		EEPROM.write(bankOffset + reg, val);
 		/*MSG_PRINT(F("reg="));
@@ -1197,7 +1289,7 @@ void ccRegWrite()	// CW cc register write
 		if (tmp_ccN > 0) {
 			MSG_PRINT(F(",N="));
 			MSG_PRINT(tmp_ccN);
-			ccN = tmp_ccN;
+			//ccN = tmp_ccN;
 		}
 		if (tmp_ccmode != 0xFF) {
 			cc1101::setIdleMode();
@@ -1502,9 +1594,9 @@ inline void configSET()
 	else if (n == 4) {			// maxnumpat
 		musterDec.cMaxNumPattern = val;
 	}
-	else if (n == 5) {			// ccN
-		ccN = val;
-	}
+//	else if (n == 5) {			// ccN
+//		ccN = val;
+//	}
 	else if (n == 6) {			// ccmode
 		ccmode = val;
 		setCCmode();
@@ -1520,7 +1612,7 @@ inline void configSET()
 			musterDec.cMaxPulse = -maxPulse;
 		}
 	}
-	else {
+	else if (n != CSccN) {
 		unsuppCmd = true;
 	}
 }
@@ -1717,7 +1809,7 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
       bank = 0;
     }
     bankOffset = getBankOffset(bank);
-    ccN = EEPROM.read(bankOffset + addr_ccN);
+    //ccN = EEPROM.read(bankOffset + addr_ccN);
     ccmode = EEPROM.read(bankOffset + addr_ccmode);
     if (ccmode == 255) {
        ccmode = 0;
