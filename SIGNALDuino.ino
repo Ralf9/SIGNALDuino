@@ -1,5 +1,5 @@
 /*
-*   RF_RECEIVER v3.32 for Arduino
+*   RF_RECEIVER v3.34 for Arduino
 *   Sketch to use an arduino as a receiver/sending device for digital signals
 *
 *   The Sketch can also encode and send data via a transmitter,
@@ -28,14 +28,15 @@
 *   You should have received a copy of the GNU General Public License
 *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+	Version from: https://github.com/Ralf9/SIGNALDuino/tree/dev-r334_cc1101
+
 */
 
 
 // Config flags for compiling correct options / boards Define only one
 
-//#define ARDUINO_ATMEGA328P_MINICUL 1
-//#define ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101 1
-#define OTHER_BOARD_WITH_CC1101  1
+#define ARDUINO_ATMEGA328P_MINICUL 1
+//#define OTHER_BOARD_WITH_CC1101  1
 
 //#define CMP_MEMDBG 1
 
@@ -47,25 +48,14 @@
 #ifdef ARDUINO_ATMEGA328P_MINICUL
 	#define CMP_CC1101     
 #endif
-#ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
-	#define CMP_CC1101     
-#endif
-
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.4-dev200627"
+#define PROGVERS               "3.3.4-dev200914"
 #define VERSION_1               0x33
 #define VERSION_2               0x40
 
 #ifdef CMP_CC1101
-	#ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
-		#define PIN_LED               13
-		#define PIN_SEND              9   // gdo0Pin TX out
-		#define PIN_RECEIVE				   7
-		#define digitalPinToInterrupt(p) ((p) == 0 ? 2 : ((p) == 1 ? 3 : ((p) == 2 ? 1 : ((p) == 3 ? 0 : ((p) == 7 ? 4 : NOT_AN_INTERRUPT)))))
-		#define PIN_MARK433			  4
-		#define SS					  8  
-	#elif ARDUINO_ATMEGA328P_MINICUL  // 8Mhz 
+	#if ARDUINO_ATMEGA328P_MINICUL  // 8Mhz 
 		#define PIN_LED               4
 		#define PIN_SEND              2   // gdo0Pin TX out
 		#define PIN_RECEIVE           3
@@ -112,6 +102,7 @@ SignalDetectorClass musterDec;
 #define maxSendPattern 8
 #define mcMinBitLenDef   17
 #define ccMaxBuf 50
+#define maxSendEcho 100
 
 // EEProm Address
 #define EE_MAGIC_OFFSET      0
@@ -119,6 +110,7 @@ SignalDetectorClass musterDec;
 #define addr_ccN             0x3D
 #define addr_ccmode          0x3E
 //#define addr_featuresB       0x3F
+#define addr_bankdescr       0x40    // 0x40-0x47 bis Bank 9 0x88-0x8F  # Bank 0 bis Bank 9, Kurzbeschreibungen (max 8 Zeichen)
 #define addr_bank            0xFD
 #define addr_features        0xFF
 
@@ -136,7 +128,7 @@ uint8_t MdebFifoLimit = 120;
 uint8_t bank = 0;
 uint16_t bankOffset = 0;
 //uint8_t ccN = 0;
-uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 - FIFO LaCrosse, 9 - FIFO mit Debug Ausgaben
+uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 - FIFO LaCrosse, 4 - FIFO LaCrosse, 9 - FIFO mit Debug Ausgaben
 uint8_t ccBuf[ccMaxBuf];
 
 void cmd_help_S();
@@ -324,9 +316,9 @@ void setup() {
 		MSG_PRINT(F("ok."));
 		hasCC1101 = true;
 	}
-	MSG_PRINT(F(" ccVer="));
-	MSG_PRINT(ccVersion);
-	MSG_PRINT(F(" ccPartnum="));
+	MSG_PRINT(F(" Ver=0x"));
+	printHex2(ccVersion);
+	MSG_PRINT(F(" Partn="));
 	MSG_PRINTLN(cc1101::getCCPartnum());
 	
 	if (hasCC1101)
@@ -372,6 +364,7 @@ void setup() {
 void cronjob() {
 	static uint16_t cnt0 = 0;
 	static uint8_t cnt1 = 0;
+	cli();
 	 const unsigned long  duration = micros() - lastTime;
 	 
 	 if (duration > maxPulse && ccmode == 0) { //Auf Maximalwert pruefen.
@@ -383,16 +376,16 @@ void cronjob() {
 
 		 lastTime = micros();
 	
-
 	 }
+	sei();
+	
+	digitalWrite(PIN_LED, blinkLED);
+	blinkLED = false;
 	if (cnt0++ == 0) {
 		if (cnt1++ == 0) {
 			getUptime();
 		}
 	}
-	 digitalWrite(PIN_LED, blinkLED);
-	 blinkLED = false;
-
 }
 
 
@@ -434,8 +427,7 @@ void loop() {
 				}
 				else {
 					MSG_PRINT(F("MF="));
-					MSG_PRINT(fifoCount, DEC);
-					MSG_PRINTLN("");
+					MSG_PRINTLN(fifoCount, DEC);
 				}
 			}
 		}
@@ -452,7 +444,12 @@ void loop() {
 	if (isHigh(PIN_RECEIVE)) {  // wait for CC1100_FIFOTHR given bytes to arrive in FIFO
 		if (LEDenabled) {
 			blinkLED=true;
+			
 		}
+		if (ccmode == 4) {
+			cc1101::ccStrobe_SIDLE();	// start over syncing
+		}
+		
 		fifoBytes = cc1101::getRXBYTES(); // & 0x7f; // read len, transfer RX fifo
 		if (fifoBytes > 0) {
 			uint8_t marcstate;
@@ -496,14 +493,31 @@ void loop() {
 					}
 				}
 			}
-			marcstate = cc1101::getMARCSTATE();
-			if (ccmode == 9) {
-				MSG_PRINT(F(" M"));
-				MSG_PRINTLN(marcstate);
+			
+			if (ccmode == 4) {
+				switch (cc1101::getMARCSTATE()) {
+					// RX_OVERFLOW
+				case 17:
+					// IDLE
+				case 1:
+					cc1101::ccStrobe_SFRX();	// Flush the RX FIFO buffer
+					cc1101::ccStrobe_SIDLE();	// Idle mode
+					cc1101::ccStrobe_SNOP();	// No operation
+					cc1101::ccStrobe_SRX();	// Enable RX
+					break;
+				}
 			}
-			if (marcstate == 17 || ccmode == 3) {	// RXoverflow oder LaCrosse?
-				cc1101::flushrx();		// Flush the RX FIFO buffer
-				cc1101::setReceiveMode();
+			else {
+				marcstate = cc1101::getMARCSTATE();
+				if (ccmode == 9) {
+					MSG_PRINT(F(" M"));
+					MSG_PRINTLN(marcstate);
+				}
+				if (marcstate == 17 || ccmode == 3) {	// RXoverflow oder LaCrosse?
+					if (cc1101::flushrx()) {		// Flush the RX FIFO buffer
+						cc1101::setReceiveMode();
+					}
+				}
 			}
 		}
 	  }
@@ -545,7 +559,8 @@ void enableReceive() {
    }
    #ifdef CMP_CC1101
    if (hasCC1101) {
-     cc1101::setIdleMode();
+     cc1101::ccStrobe_SIDLE();	// Idle mode
+     delay(1);
      cc1101::setReceiveMode();
    }
    #endif
@@ -556,7 +571,7 @@ void disableReceive() {
   detachInterrupt(digitalPinToInterrupt(PIN_RECEIVE));
 
   #ifdef CMP_CC1101
-  if (hasCC1101) cc1101::setIdleMode();
+  if (hasCC1101) cc1101::ccStrobe_SIDLE();	// Idle mode
   #endif
   FiFo.flush();
 
@@ -775,20 +790,20 @@ void send_cmd()
 			command[cmdNo].datastart = startdata;
 			command[cmdNo].dataend = start_pos-2;
 #ifdef DEBUGSENDCMD
-			MSG_PRINT("D=");
+			MSG_PRINT(F("D="));
 			MSG_PRINTLN(cmdstring.substring(startdata, start_pos-1));
 #endif
 		} else if (msg_cmd0 == 'C') {
 			command[cmdNo].sendclock = cmdstring.substring(startdata, start_pos-1).toInt();
 			extraDelay = true;
 #ifdef DEBUGSENDCMD
-			MSG_PRINT("C=");
+			MSG_PRINT(F("C="));
 			MSG_PRINTLN(command[cmdNo].sendclock);
 #endif
 		} else if (msg_cmd0 == 'F') {
 			ccParamAnz = (start_pos - startdata) / 2;
 #ifdef DEBUGSENDCMD
-			MSG_PRINT("F=");
+			MSG_PRINT(F("F="));
 #endif
 #ifndef SENDTODECODER
 			if (ccParamAnz > 0 && ccParamAnz <= 5 && hasCC1101) {
@@ -843,7 +858,13 @@ void send_cmd()
 		}
 
 #ifndef SENDTODECODER
-		MSG_PRINT(cmdstring); // echo
+		if (cmdstring.length() <= maxSendEcho) {
+			MSG_PRINT(cmdstring); // echo
+		}
+		else {
+			MSG_PRINT(cmdstring.substring(0, maxSendEcho)); // echo
+			MSG_PRINT(F(".."));
+		}
 		if (ccParamAnz > 0) {
 			MSG_PRINT(F("ccreg write back "));
 			for (uint8_t i=0;i<ccParamAnz;i++)
@@ -956,7 +977,6 @@ void HandleCommand()
 }
 
 
-
 void cmd_help_S()	// get help configvariables
 {
 	char buffer[12];
@@ -1010,9 +1030,10 @@ void cmd_bank()
 			}
 		}
 		else {
-			MSG_PRINTLN(F("Error! Bank "));
+			MSG_PRINT(F("The Bank "));
 			MSG_PRINT(bank);
-			MSG_PRINTLN(F(" is not initialized"));
+			MSG_PRINT(F(" was not init, therefore it reseted to sduino defaults (raw e). "));
+			cmd_ccFactoryReset();
 		}
 	}
 	else if (cmdstring.charAt(0) == 'b' && (cmdstring.length() == 1 || cmdstring.charAt(1) == '?')) {
@@ -1140,7 +1161,7 @@ void print_bank_sum()	// bs - Banksummary
 			}
 			else {
 				for (j = 0; j < 8; j++) {
-					ch = EEPROM.read(0x40 + (i * 8) + j);
+					ch = EEPROM.read(addr_bankdescr + (i * 8) + j);
 					if ((ch >= 32 && ch <= 122) || ch == 0) {	// space to z
 						bankStr[j] = ch;
 						if (ch == 0) {	// end
@@ -1292,8 +1313,8 @@ void ccRegWrite()	// CW cc register write
 			//ccN = tmp_ccN;
 		}
 		if (tmp_ccmode != 0xFF) {
-			cc1101::setIdleMode();
-			cc1101::setReceiveMode();
+			//cc1101::setIdleMode();
+			//cc1101::setReceiveMode();
 			MSG_PRINT(F(",ccmode="));
 			MSG_PRINT(tmp_ccmode);
 			ccmode = tmp_ccmode;
@@ -1329,10 +1350,19 @@ void cmd_writeEEPROM()	// write EEPROM und CC11001 register
     } else if (isHexadecimalDigit(cmdstring.charAt(1)) && isHexadecimalDigit(cmdstring.charAt(2)) && isHexadecimalDigit(cmdstring.charAt(3)) && isHexadecimalDigit(cmdstring.charAt(4))) {
          reg = cmdstringPos2int(1);
          val = cmdstringPos2int(3);
-         EEPROM.write(bankOffset + reg, val);
-         if (hasCC1101) {
-           cc1101::writeCCreg(reg, val);
+         if (reg < 0x40) {
+           EEPROM.write(bankOffset + reg, val);
+           if (hasCC1101) {
+             cc1101::writeReg(reg-2, val);
+           }
          }
+         else {   // ab 0x40 immer in Bank 0
+           EEPROM.write(reg, val);
+         }
+         MSG_PRINT("W");
+         printHex2(reg);
+         printHex2(val);
+         MSG_PRINTLN("");
     } else {
          unsuppCmd = true;
     }
@@ -1405,12 +1435,13 @@ void cmd_configFactoryReset()	// eC - initEEPROMconfig
          initEEPROMconfig();
          callGetFunctions();
          cc1101::CCinit();
+         RXenabled = true;
          setCCmode();
 }
 
 void cmd_ccFactoryReset()
 {
-         if (isDigit(cmdstring.charAt(1))) {
+         if (cmdstring.charAt(0) == 'e' && isDigit(cmdstring.charAt(1))) {
             cmd_bank();
          }
          cc1101::ccFactoryReset();
@@ -1423,7 +1454,9 @@ void cmd_ccFactoryReset()
             EEPROM.write(bankOffset, bank);
             EEPROM.write(bankOffset + 1, (255 - bank));
          }
-         print_Bank();
+         if (cmdstring.charAt(0) == 'e') {
+            print_Bank();
+         }
 }
 
 
