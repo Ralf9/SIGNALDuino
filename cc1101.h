@@ -78,6 +78,7 @@ namespace cc1101 {
 	// Strobe commands
 	#define CC1101_SRES     0x30  // reset
 	#define CC1101_SFSTXON  0x31  // Enable and calibrate frequency synthesizer (if MCSM0.FS_AUTOCAL=1).
+	#define CC1101_SXOFF    0x32  // Turn off crystal oscillator
 	#define CC1101_SCAL     0x33  // Calibrate frequency synthesizer and turn it off
 	#define CC1101_SRX      0x34  // Enable RX. Perform calibration first if coming from IDLE and MCSM0.FS_AUTOCAL=1
 	#define CC1101_STX      0x35  // In IDLE state: Enable TX. Perform calibration first if MCSM0.FS_AUTOCAL=1
@@ -206,18 +207,42 @@ namespace cc1101 {
 		return SPDR;
 	}
 
+	uint8_t waitTo_Miso() {	// wait with timeout until MISO goes low
+		uint8_t i = 255;
+		while(isHigh(misoPin)) {
+			delayMicroseconds(10);
+			i--;
+			if (i == 0) {	// timeout
+				cc1101_Deselect();
+				break;
+			}
+		}
+		return i;
+	}
+
 	uint8_t cmdStrobe(const uint8_t cmd) {                  // send command strobe to the CC1101 IC via SPI
 		cc1101_Select();                                // select CC1101
-		wait_Miso();                                    // wait until MISO goes low
+		//wait_Miso();                                    // wait until MISO goes low
 		uint8_t ret = sendSPI(cmd);                     // send strobe command
-		wait_Miso();                                    // wait until MISO goes low
+		//wait_Miso();                                    // wait until MISO goes low
 		cc1101_Deselect();                              // deselect CC1101
 		return ret;					// Chip Status Byte
 	}
 
+	uint8_t cmdStrobeTo(const uint8_t cmd) {            // wait MISO and send command strobe to the CC1101 IC via SPI
+		cc1101_Select();                                // select CC1101
+		if (waitTo_Miso() == 0) {                       // wait with timeout until MISO goes low
+			return false;          // timeout
+		}
+		sendSPI(cmd);                     // send strobe command
+		//wait_Miso();                                  // wait until MISO goes low
+		cc1101_Deselect();                              // deselect CC1101
+		return true;
+	}
+
 	uint8_t readReg(const uint8_t regAddr, const uint8_t regType) {       // read CC1101 register via SPI
 		cc1101_Select();                                // select CC1101
-		wait_Miso();                                    // wait until MISO goes low
+		//wait_Miso();                                    // wait until MISO goes low
 		sendSPI(regAddr | regType);                     // send register address
 		uint8_t val = sendSPI(0x00);                    // read result
 		cc1101_Deselect();                              // deselect CC1101
@@ -226,7 +251,7 @@ namespace cc1101 {
 
 	void writeReg(const uint8_t regAddr, const uint8_t val) {     // write single register into the CC1101 IC via SPI
 		cc1101_Select();                                // select CC1101
-		waitV_Miso();                                    // wait until MISO goes low
+		//waitV_Miso();                                    // wait until MISO goes low
 		sendSPI(regAddr);                               // send register address
 		sendSPI(val);                                   // send value
 		cc1101_Deselect();                              // deselect CC1101
@@ -238,7 +263,7 @@ namespace cc1101 {
 		// da ich mir nicht sicher bin ob es timing maessig passt, wenn es nach jedem sendSPI(0x00) eine kurze Pause beim msgprint gibt.
 		
 		cc1101_Select();                                // select CC1101
-		waitV_Miso();                                    // wait until MISO goes low
+		//waitV_Miso();                                    // wait until MISO goes low
 		sendSPI(CC1101_PATABLE | CC1101_READ_BURST);    // send register address
 		for (uint8_t i = 0; i < 8; i++) {
 			PatableArray[i] = sendSPI(0x00);        // read result
@@ -254,7 +279,7 @@ namespace cc1101 {
 
 	void writePatable(void) {
 		cc1101_Select();                                // select CC1101
-		waitV_Miso();                                    // wait until MISO goes low
+		//waitV_Miso();                                    // wait until MISO goes low
 		sendSPI(CC1101_PATABLE | CC1101_WRITE_BURST);   // send register address
 		for (uint8_t i = 0; i < 8; i++) {
 			sendSPI(EEPROM.read(bankOffset + EE_CC1101_PA+i));                     // send value
@@ -319,6 +344,9 @@ namespace cc1101 {
          }
          MSG_PRINTLN("");
        }
+       else {
+         MSG_PRINTLN(F("error"));
+       }
      }
   }
 
@@ -326,38 +354,37 @@ namespace cc1101 {
     uint8_t hex;
     uint8_t reg;
     uint8_t val;
-    uint8_t val1;
   
     if (isHexadecimalDigit(cmdstring.charAt(3))) {
         hex = (uint8_t)cmdstring.charAt(3);
         reg = hex2int(hex) + 0x30;
         if (reg < 0x3e) {
-             val = cmdStrobe(reg);
-             delay(1);
-             val1 = cmdStrobe(CC1101_SNOP);        //  No operation. May be used to get access to the chip status byte.
+             cc1101_Select();
+             if (waitTo_Miso() == 0) {                 // wait with timeout until MISO goes low
+                 MSG_PRINTLN(F("timeout!"));
+                 return;
+             }
+             val = sendSPI(reg);                       // send strobe command
+             cc1101_Deselect();
              MSG_PRINT(F("cmdStrobeReg "));
              printHex2(reg);
              MSG_PRINT(F(" chipStatus "));
              val = val >> 4;
              MSG_PRINT(val, HEX);
-             MSG_PRINT(F(" delay1 "));
-             val = val1 >> 4;
-             MSG_PRINT(val, HEX);
-             MSG_PRINTLN("");
+             if (reg != CC1101_SXOFF) {
+                 delay(2);
+                 val = cmdStrobe(CC1101_SNOP);        //  No operation, used to get access to the chip status byte.
+                 MSG_PRINT(F(" delay2 "));
+                 val = val >> 4;
+                 MSG_PRINTLN(val, HEX);;
+             }
+             else {
+                 MSG_PRINTLN("");
+             }
+             return;
          }
      }
-  }
-
-
-  void writeCCreg(uint8_t reg, uint8_t var) {    // write CC1101 register
-
-    if (reg > 1 && reg < 0x40) {
-           writeReg(reg-2, var);
-           MSG_PRINT("W");
-           printHex2(reg);
-           printHex2(var);
-           MSG_PRINTLN("");
-    }
+     MSG_PRINTLN(F("error"));
   }
 
 
@@ -447,17 +474,12 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		return readReg(CC1101_RXBYTES,CC1101_STATUS);  // 
 	}
 	
-	uint8_t getChipStatusByte()
-	{
-		return cmdStrobe(CC1101_SNOP);
-	}
-	
 	bool readRXFIFO(uint8_t len) {
 		bool dup = true;
 		uint8_t rx;
 		
 		cc1101_Select();                                // select CC1101
-		waitV_Miso();                                    // wait until MISO goes low
+		//waitV_Miso();                                    // wait until MISO goes low
 		sendSPI(CC1101_RXFIFO | CC1101_READ_BURST);    // send register address
 		for (uint8_t i = 0; i < len; i++) {
 			rx = sendSPI(0x00);        // read result
@@ -476,7 +498,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		uint8_t i;
 		
 		cc1101_Select();                                // select CC1101
-		waitV_Miso();                                    // wait until MISO goes low
+		//waitV_Miso();                                    // wait until MISO goes low
 		sendSPI(CC1101_TXFIFO | CC1101_WRITE_BURST);   // send register address
 		for (i = start; i < end; i+=2) {
 			val = cmdstringPos2int(i);
@@ -497,16 +519,35 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		//MSG_PRINTLN("");
 	}
 	
-	inline void setIdleMode()
+	uint8_t ccStrobe_SNOP()	// No operation. May be used to get access to the chip status byte
 	{
-		cmdStrobe(CC1101_SIDLE);                             // Idle mode
-		delay(1);
+		return cmdStrobe(CC1101_SNOP);
 	}
 	
-	void flushrx() {		// Flush the RX FIFO buffer
+//	void setIdleMode()
+	void ccStrobe_SIDLE()	// Idle mode
+	{
 		cmdStrobe(CC1101_SIDLE);
+		//delay(1);
+	}
+	
+	void ccStrobe_SRX()	// Enable RX
+	{
+		cmdStrobe(CC1101_SRX);
+	}
+	
+	void ccStrobe_SFRX()	// Flush the RX FIFO buffer
+	{
+		cmdStrobe(CC1101_SFRX);
+	}
+	
+	 uint8_t flushrx() {		// Flush the RX FIFO buffer
+		if (cmdStrobeTo(CC1101_SIDLE) == false) {
+			return false;
+		}
 		cmdStrobe(CC1101_SNOP);
 		cmdStrobe(CC1101_SFRX);
+		return true;
 	}
 
 	void setReceiveMode()
@@ -520,19 +561,25 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 
 	}
 
-	void setTransmitMode()
+	uint8_t setTransmitMode()
 	{
-		cmdStrobe(CC1101_SFTX);   // wird dies benoetigt? Wir verwenden kein FIFO
-		setIdleMode();
+		if (cmdStrobeTo(CC1101_SFTX) == false) {	// flush TX with wait MISO timeout
+			DBG_PRINTLN(F("CC1101: Setting TX failed"));
+			return false;
+		}
+		cmdStrobe(CC1101_SIDLE);
 		uint8_t maxloop = 0xff;
 		while (maxloop-- && (cmdStrobe(CC1101_STX) & CC1101_STATUS_STATE_BM) != CC1101_STATE_TX)  // TX enable
 			delay(1);
-		if (maxloop == 0) DBG_PRINTLN(F("CC1101: Setting TX failed"));
+		if (maxloop == 0) {
+			DBG_PRINTLN(F("CC1101: Setting TX failed"));
+			return false;
+		}
+		return true;
 	}
 
-	void CCinit(void) {                              // initialize CC1101
-
-		cc1101_Deselect();                                  // some deselect and selects to init the cc1101
+	bool CCreset(void) {
+		cc1101_Deselect();            // some deselect and selects to init the cc1101
 		delayMicroseconds(30);
 
 		// Begin of power on reset
@@ -541,12 +588,23 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 
 		cc1101_Deselect();
 		delayMicroseconds(45);
-		
-		//DBG_PRINTLN("SRES Started");
-		cmdStrobe(CC1101_SRES);                               // send reset
-		//DBG_PRINTLN("POR Done");
-		delay(10);
 
+		cc1101_Select();
+		if (waitTo_Miso() == 0) {  // wait with timeout until MISO goes low
+			return false;            // timeout
+		}
+		sendSPI(CC1101_SRES);        // send strobe command
+		
+		if (waitTo_Miso() == 0) {  // wait with timeout until MISO goes low
+			return false;            // timeout
+		}
+		cc1101_Deselect();
+		
+		delay(1);
+		return true;
+	}
+
+	void CCinit_reg(void) {                              // initialize CC1101
 		cc1101_Select();
 		
 		sendSPI(CC1101_WRITE_BURST);
@@ -560,7 +618,12 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 
 		cmdStrobe(CC1101_SCAL); 
 		delay(1);
-		setReceiveMode();
+	}
+	
+	void CCinit(void) {                              // initialize CC1101
+		CCreset();
+		CCinit_reg();
+		//setReceiveMode();
 	}
 
 	bool regCheck()
