@@ -35,6 +35,7 @@
 
 //#define ARDUINO_ATMEGA328P_MINICUL 1
 //#define ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101 1
+//#define ARDUINO_BUSWARE_CUL 1                                 // BusWare CUL V3 (ATmega32U4)
 #define OTHER_BOARD_WITH_CC1101  1
 
 //#define CMP_MEMDBG 1
@@ -49,6 +50,9 @@
 #endif
 #ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
 	#define CMP_CC1101     
+#endif
+#ifdef ARDUINO_BUSWARE_CUL
+	#define CMP_CC1101
 #endif
 
 
@@ -65,6 +69,13 @@
 		#define digitalPinToInterrupt(p) ((p) == 0 ? 2 : ((p) == 1 ? 3 : ((p) == 2 ? 1 : ((p) == 3 ? 0 : ((p) == 7 ? 4 : NOT_AN_INTERRUPT)))))
 		#define PIN_MARK433			  4
 		#define SS					  8  
+	#elif ARDUINO_BUSWARE_CUL
+		#define PIN_LED                  7 // LED_BUILTIN
+		#define PIN_SEND                 1 // gdo0Pin TX out
+		#define PIN_RECEIVE              0 // gdo2
+		#define digitalPinToInterrupt(p) ((p) == 0 ? 2 : ((p) == 1 ? 3 : ((p) == 2 ? 1 : ((p) == 3 ? 0 : ((p) == 7 ? 4 : NOT_AN_INTERRUPT)))))
+		#define PIN_MARK433              10
+		#define SS                       17
 	#elif ARDUINO_ATMEGA328P_MINICUL  // 8Mhz 
 		#define PIN_LED               4
 		#define PIN_SEND              2   // gdo0Pin TX out
@@ -83,7 +94,7 @@
 
 
 #define BAUDRATE               57600
-#define FIFO_LENGTH            140      // 50
+#define FIFO_LENGTH            140 // 50
 
 //#define WATCHDOG	1 // Der Watchdog ist in der Entwicklungs und Testphase deaktiviert. Es muss auch ohne Watchdog stabil funktionieren.
 //#define DEBUGSENDCMD  1
@@ -425,9 +436,10 @@ void disableReceive() {
 
 /*void send_rawx(const uint8_t startpos,const uint16_t endpos,const int16_t *buckets, String *source=&cmdstring)
 {
-  int16_t sendarr[] ={200,-200,300,-300,500,-400,600,-600,800,-800,500,-500,200,-200,300,-300,500,-400,600,-600,800,-800,500,-500,200,-200,500,-300,400,-400,500,-600,800,-800,500,-500,200,-200,300,-300,400,-400,600,-600,1100,-1100,800,-800,500,-500};
+//  int16_t sendarr[] ={200,-200,300,-300,500,-400,600,-600,800,-800,500,-500,200,-200,300,-300,500,-400,600,-600,800,-800,500,-500,200,-200,500,-300,400,-400,500,-600,800,-800,500,-500,200,-200,300,-300,400,-400,600,-600,1100,-1100,800,-800,500,-500};
+  int16_t sendarr[] = {-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-154,260,-1400,1724,-154,260,-367,260,-154,940,-572,260,-154,260,-154,1312,-154,940,-367,468,-1200,940,-1200,260,-784,260,-154,260};
   int16_t p;
-  for (uint8_t i=0;i<50;i++ ) {
+  for (uint8_t i=0;i<62;i++ ) {
     p = sendarr[i];
     //MSG_PRINTLN(p);
     musterDec.decode(&p);
