@@ -56,8 +56,8 @@
 
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
 
-#define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "4.1.1-dev200627"
+#define PROGNAME               " SIGNALduinoAdv "
+#define PROGVERS               "4.1.2-dev201221"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -1635,7 +1635,7 @@ void print_ip(uint8_t ip[])
 
 void cmd_Version()	// V: Version
 {
-	MSG_PRINT(F("V " PROGVERS " SIGNALduino "));
+	MSG_PRINT(F("V " PROGVERS  PROGNAME));
 #ifdef LAN_WIZ
 	MSG_PRINT(F("LAN "));
 #endif
