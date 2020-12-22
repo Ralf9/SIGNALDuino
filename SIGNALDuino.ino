@@ -28,28 +28,13 @@
 *   You should have received a copy of the GNU General Public License
 *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
-	Version from: https://github.com/Ralf9/SIGNALDuino/blob/dev-r41x_cc110
+	Version from: https://github.com/Ralf9/SIGNALDuino/blob/dev-r412_cc1101
 
 *-------------------------------------------------------------------------------------------------------------------
 	
 */
 
-
-// Config flags for compiling correct options / boards Define only one
-
-#define MAPLE_SDUINO 1
-//#define MAPLE_CUL 1
-//#define LAN_WIZ 1
-#define MAPLE_WATCHDOG 1
-
-//#define DEBUG_BackupReg 1  // bitte auch das "#define DEBUG_BackupReg 1" in der SignalDecoder.h beachten
-//#define DEBUG_SERIAL 2	// debug level
-#define SerialNr USART1	// serial2 = USART2
-
-//#define ARDUINO_ATMEGA328P_MINICUL 1
-//#define OTHER_BOARD_WITH_CC1101  1
-//#define CMP_MEMDBG 1
+#include "compile_config.h"
 
 // *** bitte auch das "#define LAN_WIZ 1" in der SignalDecoder.h beachten ***
 // *** nur bei core 1.8.0: bitte auch das "#define LAN_WIZ 1" in der USBD_reenumerate.c beachten ***
@@ -57,24 +42,10 @@
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.1.2-dev201221"
+#define PROGVERS               "4.1.2-dev201222"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
-#ifdef OTHER_BOARD_WITH_CC1101
-	#define CMP_CC1101
-#endif
-#ifdef ARDUINO_ATMEGA328P_MINICUL
-	#define CMP_CC1101
-#endif
-#ifdef MAPLE_SDUINO
-	#define MAPLE_Mini
-	#define CMP_CC1101
-#endif
-#ifdef MAPLE_CUL
-	#define MAPLE_Mini
-	#define CMP_CC1101
-#endif
 
 #ifdef CMP_CC1101
 	#ifdef ARDUINO_ATMEGA328P_MINICUL  // 8Mhz 
@@ -114,7 +85,6 @@
 #endif
 
 //#define WATCHDOG	1 // Der Watchdog ist in der Entwicklungs und Testphase deaktiviert. Es muss auch ohne Watchdog stabil funktionieren.
-//#define DEBUGSENDCMD  1
 //(#define SENDTODECODER 1) ist neu ccmode=15 -> damit wird in der send_raw Routine anstatt zu senden, die Pulse direkt dem Decoder uebergeben
 
 #define DEBUG                  1
@@ -215,6 +185,7 @@ String cmdstring = "";
 char msg_cmd0 = ' ';
 char msg_cmd1 = ' ';
 volatile unsigned long lastTime = micros();
+volatile bool lastFifoLowMax = false;
 bool hasCC1101 = false;
 bool LEDenabled = true;
 bool toggleBankEnabled = false;
@@ -473,7 +444,7 @@ pinAsOutput(PIN_LED);
 #endif
   	initEEPROM();
 #ifdef CMP_CC1101
-	MSG_PRINTLN(F("CCInit "));
+	MSG_PRINTLN(F("CCInit"));
 	uint8_t statRadio;
 	for (radionr = 0; radionr < 4; radionr++) {		// init radio
 		statRadio = tools::EEread(addr_statRadio + radionr);
@@ -566,9 +537,14 @@ void cronjob() {
 	 if (duration > maxPulse && RXenabled[radioOokAsk]) { //Auf Maximalwert pruefen.
 		 int16_t sDuration = maxPulse;
 		 if (isLow(PIN_RECEIVE)) { // Wenn jetzt low ist, ist auch weiterhin low
-			 sDuration = -sDuration;
+			if (lastFifoLowMax == false) { // der letzte FiFo war nicht maxPulse
+				FiFo.enqueue(-sDuration);
+				lastFifoLowMax = true;
+			}
 		 }
-		 FiFo.enqueue(sDuration);
+		 else {
+			FiFo.enqueue(sDuration);
+		 }
 
 		 lastTime = micros();
 	 }
@@ -643,6 +619,7 @@ void loop() {
 	while (FiFo.count()>0 ) { //Puffer auslesen und an Dekoder uebergeben
 
 		aktVal=FiFo.dequeue();
+		//MSG_PRINTLN(aktVal, DEC);
 		state = musterDec.decode(&aktVal);
 		if (musterDec.MdebEnabled && musterDec.printMsgSuccess) {
 			fifoCount = FiFo.count();
@@ -775,10 +752,8 @@ void handleInterrupt() {
     if (isHigh(PIN_RECEIVE)) { // Wenn jetzt high ist, dann muss vorher low gewesen sein, und dafuer gilt die gemessene Dauer.
       sDuration=-sDuration;
     }
-	//MSG_PRINTLN(sDuration);
     FiFo.enqueue(sDuration);
-
-    //++fifocnt;
+    lastFifoLowMax = false;
   } // else => trash
 #ifdef MAPLE_Mini
   interrupts();
@@ -1641,11 +1616,6 @@ void cmd_Version()	// V: Version
 #endif
 	if (hasCC1101) {
 	    MSG_PRINT(F("cc1101 "));
-#ifdef PIN_MARK433
-	    MSG_PRINT(F("(minicul "));
-	    MSG_PRINT(isLow(PIN_MARK433) ? "433" : "868");
-	    MSG_PRINT(F("MHz) "));
-#endif
 	}
 	MSG_PRINT(F("(R:"));
 	
@@ -2204,7 +2174,7 @@ inline void configSET()
 	}
 }
 
-inline uint8_t radioDetekt(bool confmode, uint8_t Dstat)
+uint8_t radioDetekt(bool confmode, uint8_t Dstat)
 {
 	uint8_t pn;
 	uint8_t ver;

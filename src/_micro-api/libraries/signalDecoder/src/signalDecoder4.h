@@ -38,11 +38,10 @@
 	//#include "WProgram.h"
 #endif
 
-#define CMP_CC1101
+#include "compile_config.h"
+
 #define DEBUG 1
 
-//#define LAN_WIZ 1	// die Ausgabe ueber Ethernet funktioniert nur, wenn dies hier nochmals definiert wird
-//#define DEBUG_BackupReg 1
 #ifdef DEBUG_BackupReg
 	#include <backup.h>
 #endif
