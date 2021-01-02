@@ -47,7 +47,7 @@
 #endif
 
 #include "output.h"
-#include "bitstore.h"
+#include "bitstore4.h"
 #include "FastDelegate.h"
 
 #define maxNumPattern 16
