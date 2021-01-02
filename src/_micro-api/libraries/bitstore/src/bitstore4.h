@@ -93,7 +93,7 @@ BitStore<bufSize>::BitStore(uint8_t bitlength) :buffsize(bufSize)
 	bmask = 0;
 	//buffsize = bufsize;
 	//datastore= (unsigned char*) calloc(bufsize,sizeof(char)); // Speicher allokieren und 0 zuweisen
-	//bytecount = bufSize;/tmp/arduino_build_153085/RF_Receiver_412.ino.bin
+	//bytecount = bufSize;
 	reset();
 	for (uint8_t x = 7; x>(7 - valuelen); x--)
 	{
@@ -224,7 +224,7 @@ bool BitStore<bufSize>::moveLeft(const uint16_t begin)
 			Serial.println("");
 			Serial.print("@[");  Serial.print(i, DEC); Serial.print("]");
 			Serial.print("->[");  Serial.print(z, DEC); Serial.print("] ");
-/tmp/arduino_build_153085/RF_Receiver_412.ino.bin
+
 			Serial.print("z="); Serial.print(datastore[z], BIN);
 			Serial.print(" ileft="); Serial.print(datastore[i] << shift_left, BIN);
 			Serial.print(" iright="); Serial.print(datastore[i + 1] >> shift_right, BIN);
