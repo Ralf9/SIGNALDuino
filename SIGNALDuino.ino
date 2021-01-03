@@ -42,43 +42,30 @@
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.1.2-dev201222"
+#define PROGVERS               "4.1.2-dev210102"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
 
-#ifdef CMP_CC1101
-	#ifdef ARDUINO_ATMEGA328P_MINICUL  // 8Mhz 
-		#define PIN_LED               4
-		#define PIN_SEND              2   // gdo0Pin TX out
-		#define PIN_RECEIVE           3
-		#define PIN_MARK433	      A0
-	#elif MAPLE_SDUINO
+	#ifdef MAPLE_SDUINO
+		const uint8_t pinReceive[] = {11, 18, 16, 14};
 		#define PIN_LED              33
 		#define PIN_SEND             17   // gdo0 Pin TX out
-	    #define PIN_RECEIVE          18   // gdo2
+	    #define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
+		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
 		#define PIN_WIZ_RST          27
 	#elif MAPLE_CUL
+		const uint8_t pinReceive[] = {11, 18, 16, 14};
 		#define PIN_LED              33
 		#define PIN_SEND             17   // gdo0 Pin TX out
-	    #define PIN_RECEIVE          18
+	    #define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
+		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
 		#define PIN_WIZ_RST          27
-	#else 
-		#define PIN_LED               9
-		#define PIN_SEND              3   // gdo0Pin TX out
-	    #define PIN_RECEIVE           2
 	#endif
-#else
-	#define PIN_RECEIVE            2
-	#define PIN_LED                13 // Message-LED
-	#define PIN_SEND               11
-#endif
-
 
 #ifdef MAPLE_Mini
 	#define BAUDRATE               115200
 	#define FIFO_LENGTH            170
-	const uint8_t pinReceive[] = {11, 18, 16, 14};
 #else
 	#define BAUDRATE               57600
 	#define FIFO_LENGTH            140 // 50
@@ -107,12 +94,14 @@
 #include "cc1101.h"
 #include "FastDelegate.h"
 #include "output.h"
-#include "bitstore.h"
+#include "bitstore4.h"
 #include "signalDecoder4.h"
 #include "SimpleFIFO.h"
 
-SimpleFIFO<int16_t,FIFO_LENGTH> FiFo; //store FIFO_LENGTH # ints
-SignalDetectorClass musterDec;
+SimpleFIFO<int16_t,FIFO_LENGTH> FiFoA; //store FIFO_LENGTH
+SimpleFIFO<int16_t,FIFO_LENGTH> FiFoB; //store FIFO_LENGTH
+//SignalDetectorClass musterDecA;
+SignalDetectorClass musterDecB;
 
 #ifdef MAPLE_Mini
   #include <malloc.h>
@@ -141,11 +130,7 @@ SignalDetectorClass musterDec;
 
 #define pulseMin  90
 
-#ifdef MAPLE_Mini
-  #define maxCmdString 600
-#else
-  #define maxCmdString 350
-#endif
+#define maxCmdString 600
 
 #define maxSendPattern 10
 #define mcMinBitLenDef   17
@@ -161,14 +146,16 @@ SignalDetectorClass musterDec;
 //#define addr_togglesec       0x3C
 #define addr_ccN             0x3D
 #define addr_ccmode          0x3E
-//#define addr_featuresB       0x3F
+//#define addr_features2       0x3F
 #define addr_bankdescr       0x40    // 0x40-0x47 bis Bank 9 0x88-0x8F  # Bank 0 bis Bank 9, Kurzbeschreibungen (max 8 Zeichen)
 #define addr_rxRes           0xE9    // bei 0xA5 ist rx nach dem Reset disabled
 // #define addr              0xEA  res
 #define addr_statRadio       0xEB    // A=EB B=EC C=ED D=EE  Bit 0-3 Bank,  1F-Init, Bit 6 = 1 - Fehler bei Erkennung, Bit 6&7 = 1 - Miso Timeout, FF-deaktiviert
 #define addr_selRadio        0xEF
 //#define addr_bank            0xFD
-#define addr_features        0xFF
+//      addr_features                res mseq led deb red mc mu ms  (7 .. 0)
+#define addr_featuresA       0xFE // cc1101 Modul A
+#define addr_featuresB       0xFF // cc1101 Modul B
 // Ethernet EEProm Address
 #define EE_MAC_ADDR    0xC0
 #define EE_IP4_ADDR    0xC8
@@ -184,19 +171,23 @@ volatile bool blinkLED = false;
 String cmdstring = "";
 char msg_cmd0 = ' ';
 char msg_cmd1 = ' ';
-volatile unsigned long lastTime = micros();
-volatile bool lastFifoLowMax = false;
+volatile unsigned long lastTimeA = micros();
+volatile unsigned long lastTimeB = micros();
+volatile bool lastFifoALowMax = false;
+volatile bool lastFifoBLowMax = false;
 bool hasCC1101 = false;
 bool LEDenabled = true;
-bool toggleBankEnabled = false;
+//bool toggleBankEnabled = false;
 bool RXenabled[] = {false, false, false, false};	// true - enable receive, Zwischenspeicher zum enablereceive merken
+bool RXenabledSlowRfA = false;
+bool RXenabledSlowRfB = false;
 bool unsuppCmd = false;
 bool CmdOk = false;
 uint8_t MdebFifoLimit = 120;
 uint8_t bank = 0;
 uint16_t bankOffset = 0;
 //uint8_t ccN = 0;
-uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 - FIFO LaCrosse, 9 - FIFO mit Debug Ausgaben
+uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 - FIFO LaCrosse, 4 - FIFO LaCrosse, 9 - FIFO mit Debug Ausgaben
 uint8_t radionr = defSelRadio;
 uint8_t radio_bank[4];
 uint8_t ccBuf[4][ccMaxBuf];
@@ -231,7 +222,7 @@ void cmd_writeEEPROM();
 void cmd_writePatable();
 void changeReceiver();
 
-//typedef void (* GenericFP)(int); //function pointer prototype to a function which takes an 'int' an returns 'void'
+//typedef void (* GenericFP)(int); //function pointer prototype to a function which takesaddr_ccN an 'int' an returns 'void'
 #define cmdAnz 23
 const char cmd0[] =  {'?', '?', 'b', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'e', 'e', 'P', 'r', 'R', 'S', 't', 'T', 'V', 'W', 'x', 'X', 'X'};
 const char cmd1[] =  {'S', ' ', ' ', 'E', 'D', 'G', 'R', 'S', 'W', ' ', 'C', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'E', 'Q'};
@@ -285,59 +276,16 @@ const char string_9[] PROGMEM = "maxpulse";
 
 const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6, string_7, string_8, string_9};
 
-#ifdef CMP_MEMDBG
-
-extern unsigned int __data_start;
-extern unsigned int __data_end;
-extern unsigned int __bss_start;
-extern unsigned int __bss_end;
-extern unsigned int __heap_start;
-extern void *__brkval;
-uint8_t *heapptr, *stackptr;
-uint16_t diff=0;
-void check_mem() {
- stackptr = (uint8_t *)malloc(4);          // use stackptr temporarily
- heapptr = stackptr;                     // save value of heap pointer
- free(stackptr);      // free up the memory again (sets stackptr to 0)
- stackptr =  (uint8_t *)(SP);           // save value of stack pointer
-}
-//extern int __bss_end;
-//extern void *__brkval;
-
-int get_free_memory()
-{
- int free_memory;
-
- if((int)__brkval == 0)
-    free_memory = ((int)&free_memory) - ((int)&__bss_end);
- else
-   free_memory = ((int)&free_memory) - ((int)__brkval);
-
- return free_memory;
-}
-
-
-int16_t ramSize=0;   // total amount of ram available for partitioning
-int16_t dataSize=0;  // partition size for .data section
-int16_t bssSize=0;   // partition size for .bss section
-int16_t heapSize=0;  // partition size for current snapshot of the heap section
-int16_t stackSize=0; // partition size for current snapshot of the stack section
-int16_t freeMem1=0;  // available ram calculation #1
-int16_t freeMem2=0;  // available ram calculation #2
-
-#endif  // CMP_MEMDBG
-
 void handleInterrupt();
 void enableReceive();
 void disableReceive();
 void serialEvent();
 void cronjob();
-int freeRam();
 void HandleCommand();
 bool command_available=false;
 unsigned long getUptime();
-void storeFunctions(const int8_t ms=1, int8_t mu=1, int8_t mc=1, int8_t red=1, int8_t deb=0, int8_t led=1, int8_t overfl=0);
-void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl);
+//void storeFunctions(const int8_t ms=1, int8_t mu=1, int8_t mc=1, int8_t red=1, int8_t deb=0, int8_t led=1, int8_t overfl=0);
+//void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl);
 void initEEPROM(void);
 void setCCmode();
 void print_Bank();
@@ -399,7 +347,7 @@ pinAsOutput(PIN_LED);
 	MSG_PRINTLN(sichBackupReg);
 	setBackupReg(0);
 #endif
-	if (musterDec.MdebEnabled) {
+	if (musterDecB.MdebEnabled) {
 		DBG_PRINTLN(F("Using sFIFO"));
 	}
 #ifdef MAPLE_WATCHDOG
@@ -434,7 +382,10 @@ pinAsOutput(PIN_LED);
 	wdt_enable(WDTO_2S);  	// Enable Watchdog
 #endif
 	//delay(2000);
-	pinAsInput(PIN_RECEIVE);
+	pinAsInput(PIN_RECEIVE_A);
+	pinAsInput(PIN_RECEIVE_B);
+	pinAsInput(pinReceive[2]);
+	pinAsInput(pinReceive[3]);
 	// CC1101
 #ifdef WATCHDOG
 	wdt_reset();
@@ -466,13 +417,13 @@ pinAsOutput(PIN_LED);
 	
 //	if (radio_bank[remRadionr] < 10)
 //	{
-		musterDec.setRSSICallback(&cc1101::getRSSI);                    // Provide the RSSI Callback
+		musterDecB.setRSSICallback(&cc1101::getRSSI);                    // Provide the RSSI Callback
 //	} 
 //	else
 //		musterDec.setRSSICallback(&rssiCallback);	// Provide the RSSI Callback		
 #endif 
 
-	if (musterDec.MdebEnabled) {
+	if (musterDecB.MdebEnabled) {
 		MSG_PRINTLN(F("Starting timerjob"));
 	}
 	delay(50);
@@ -532,22 +483,43 @@ void cronjob() {
 #endif
 	static uint16_t cnt0 = 0;
 	static uint8_t cnt1 = 0;
-	 const unsigned long  duration = micros() - lastTime;
-	 
-	 if (duration > maxPulse && RXenabled[radioOokAsk]) { //Auf Maximalwert pruefen.
+	unsigned long durationA;
+	unsigned long durationB;
+	
+	if (RXenabledSlowRfA) {
+	  durationA = micros() - lastTimeA;
+	  if (durationA > maxPulse) { //Auf Maximalwert pruefen.
 		 int16_t sDuration = maxPulse;
-		 if (isLow(PIN_RECEIVE)) { // Wenn jetzt low ist, ist auch weiterhin low
-			if (lastFifoLowMax == false) { // der letzte FiFo war nicht maxPulse
-				FiFo.enqueue(-sDuration);
-				lastFifoLowMax = true;
+		 if (isLow(PIN_RECEIVE_A)) { // Wenn jetzt low ist, ist auch weiterhin low
+			if (lastFifoALowMax == false) { // der letzte FiFo war nicht maxPulse
+				FiFoA.enqueue(-sDuration);
+				lastFifoALowMax = true;
 			}
 		 }
 		 else {
-			FiFo.enqueue(sDuration);
+			FiFoA.enqueue(sDuration);
 		 }
-
-		 lastTime = micros();
-	 }
+		 lastTimeA = micros();
+	  }
+	}
+	
+	if (RXenabledSlowRfB) {
+	  durationB = micros() - lastTimeB;
+	  if (durationB > maxPulse) { //Auf Maximalwert pruefen.
+		 int16_t sDuration = maxPulse;
+		 if (isLow(PIN_RECEIVE_B)) { // Wenn jetzt low ist, ist auch weiterhin low
+			if (lastFifoBLowMax == false) { // der letzte FiFo war nicht maxPulse
+				FiFoB.enqueue(-sDuration);
+				lastFifoBLowMax = true;
+			}
+		 }
+		 else {
+			FiFoB.enqueue(sDuration);
+		 }
+		 lastTimeB = micros();
+	  }
+	}
+	
 	 digitalWrite(PIN_LED, blinkLED);
 	 blinkLED = false;
 
@@ -615,23 +587,42 @@ void loop() {
   bankoff = getBankOffset(tmpBank);
   ccmode = tools::EEread(bankoff + addr_ccmode);
   if (ccmode == 0) {
-	musterDec.printMsgSuccess = false;
-	while (FiFo.count()>0 ) { //Puffer auslesen und an Dekoder uebergeben
-
-		aktVal=FiFo.dequeue();
-		//MSG_PRINTLN(aktVal, DEC);
-		state = musterDec.decode(&aktVal);
-		if (musterDec.MdebEnabled && musterDec.printMsgSuccess) {
-			fifoCount = FiFo.count();
-			if (fifoCount > MdebFifoLimit) {
+	if (radionr == 0) {
+		//musterDecA.printMsgSuccess = false;
+		while (FiFoA.count() > 0) { // Puffer auslesen und an Dekoder uebergeben
+			aktVal=FiFoA.dequeue();
+			//MSG_PRINTLN(aktVal, DEC);
+			/*state = musterDecA.decode(&aktVal);
+			if (musterDecA.MdebEnabled && musterDecA.printMsgSuccess) {
+				fifoCount = FiFoA.count();
+				if (fifoCount > MdebFifoLimit) {
+					MSG_PRINT(F("MFa="));
+					MSG_PRINTLN(fifoCount, DEC);
+				}
+			}
+			if (musterDecB.printMsgSuccess && LEDenabled) {
+				blinkLED=true; //LED blinken, wenn Meldung dekodiert
+			}
+			musterDecA.printMsgSuccess = false;*/
+		}
+	} else if (radionr == 1) {
+		musterDecB.printMsgSuccess = false;
+		while (FiFoB.count() > 0) { //Puffer auslesen und an Dekoder uebergeben
+			aktVal=FiFoB.dequeue();
+			//MSG_PRINTLN(aktVal, DEC);
+			state = musterDecB.decode(&aktVal);
+			if (musterDecB.MdebEnabled && musterDecB.printMsgSuccess) {
+				fifoCount = FiFoB.count();
+				if (fifoCount > MdebFifoLimit) {
 					MSG_PRINT(F("MF="));
 					MSG_PRINTLN(fifoCount, DEC);
+				}
 			}
+			if (musterDecB.printMsgSuccess && LEDenabled) {
+				blinkLED=true; //LED blinken, wenn Meldung dekodiert
+			}
+			musterDecB.printMsgSuccess = false;
 		}
-		if (musterDec.printMsgSuccess && LEDenabled) {
-			blinkLED=true; //LED blinken, wenn Meldung dekodiert
-		}
-		musterDec.printMsgSuccess = false;
 	}
   }
   else if (ccmode < 15) {
@@ -733,15 +724,15 @@ void getRxFifo(uint16_t Boffs) {
 }
 
 //========================= Pulseauswertung ================================================
-void handleInterrupt() {
+void handleInterruptA() {
 #ifdef MAPLE_Mini
   noInterrupts();
 #else
   cli();
 #endif
   const unsigned long Time=micros();
-  const unsigned long  duration = Time - lastTime;
-  lastTime = Time;
+  const unsigned long  duration = Time - lastTimeA;
+  lastTimeA = Time;
   if (duration >= pulseMin) {//kleinste zulaessige Pulslaenge
 	int16_t sDuration;
     if (duration < maxPulse) {//groesste zulaessige Pulslaenge, max = 32000
@@ -749,11 +740,40 @@ void handleInterrupt() {
     }else {
       sDuration = maxPulse; // Maximalwert set to maxPulse defined in lib.
     }
-    if (isHigh(PIN_RECEIVE)) { // Wenn jetzt high ist, dann muss vorher low gewesen sein, und dafuer gilt die gemessene Dauer.
+    if (isHigh(PIN_RECEIVE_A)) { // Wenn jetzt high ist, dann muss vorher low gewesen sein, und dafuer gilt die gemessene Dauer.
       sDuration=-sDuration;
     }
-    FiFo.enqueue(sDuration);
-    lastFifoLowMax = false;
+    FiFoA.enqueue(sDuration);
+    lastFifoALowMax = false;
+  } // else => trash
+#ifdef MAPLE_Mini
+  interrupts();
+#else
+  sei();
+#endif
+}
+
+void handleInterruptB() {
+#ifdef MAPLE_Mini
+  noInterrupts();
+#else
+  cli();
+#endif
+  const unsigned long Time=micros();
+  const unsigned long  duration = Time - lastTimeB;
+  lastTimeB = Time;
+  if (duration >= pulseMin) {//kleinste zulaessige Pulslaenge
+	int16_t sDuration;
+    if (duration < maxPulse) {//groesste zulaessige Pulslaenge, max = 32000
+      sDuration = int16_t(duration); //das wirft bereits hier unnoetige Nullen raus und vergroessert den Wertebereich
+    }else {
+      sDuration = maxPulse; // Maximalwert set to maxPulse defined in lib.
+    }
+    if (isHigh(PIN_RECEIVE_B)) { // Wenn jetzt high ist, dann muss vorher low gewesen sein, und dafuer gilt die gemessene Dauer.
+      sDuration=-sDuration;
+    }
+    FiFoB.enqueue(sDuration);
+    lastFifoBLowMax = false;
   } // else => trash
 #ifdef MAPLE_Mini
   interrupts();
@@ -764,8 +784,13 @@ void handleInterrupt() {
 
 void enableReceive() {
   if (RXenabled[radionr] == true) {
+   if (ccmode == 0 && radionr == 0) {
+     attachInterrupt(digitalPinToInterrupt(PIN_RECEIVE_A), handleInterruptA, CHANGE);
+     RXenabledSlowRfA = true;
+   }
    if (ccmode == 0 && radionr == 1) {
-     attachInterrupt(digitalPinToInterrupt(PIN_RECEIVE), handleInterrupt, CHANGE);
+     attachInterrupt(digitalPinToInterrupt(PIN_RECEIVE_B), handleInterruptB, CHANGE);
+     RXenabledSlowRfB = true;
    }
    #ifdef CMP_CC1101
    if (hasCC1101 && ccmode < 15) {
@@ -778,13 +803,19 @@ void enableReceive() {
 }
 
 void disableReceive() {
+  if (ccmode == 0 && radionr == 0) {
+    detachInterrupt(digitalPinToInterrupt(PIN_RECEIVE_A));
+    RXenabledSlowRfA = false;
+    FiFoA.flush();
+  }
   if (ccmode == 0 && radionr == 1) {
-    detachInterrupt(digitalPinToInterrupt(PIN_RECEIVE));
+    detachInterrupt(digitalPinToInterrupt(PIN_RECEIVE_B));
+    RXenabledSlowRfB = false;
+    FiFoB.flush();
   }
   #ifdef CMP_CC1101
   if (hasCC1101) cc1101::ccStrobe_SIDLE();	// Idle mode
   #endif
-  FiFo.flush();
 }
 
 /*void send_rawx(const uint8_t startpos,const uint16_t endpos,const int16_t *buckets, String *source=&cmdstring)
@@ -833,7 +864,7 @@ void send_raw(const uint8_t startpos,const uint16_t endpos,const int16_t *bucket
 		isLow=buckets[index] >> 15;
 		dur = abs(buckets[index]); 
 		if (isLow) dur = -dur;
-		musterDec.decode(&dur);
+		musterDecB.decode(&dur);
 	}
   }
 	//MSG_PRINTLN("");
@@ -1106,7 +1137,7 @@ void send_cmd()
 	  }
 	  else {
 		int16_t dur = -32001;
-		musterDec.decode(&dur);
+		musterDecB.decode(&dur);
 	  }
 	}
 	
@@ -1206,7 +1237,6 @@ void send_ccFIFO()
 }
 
 //================================= Kommandos ======================================
-void IT_CMDs();
 
 void HandleCommand()
 {
@@ -1664,13 +1694,15 @@ void cmd_freeRam()	// R: FreeMemory
 	struct mallinfo mi = mallinfo();
 	MSG_PRINTLN(((stack_ptr < minSP) ? stack_ptr : minSP) - heapend + mi.fordblks);
 #else
-	MSG_PRINTLN(freeRam());
+	extern int __heap_start, *__brkval;
+	int v;
+	MSG_PRINTLN((int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval));
 #endif
 }
 
 void cmd_send()
 {
-	if (musterDec.getState() != searching )
+	if (musterDecB.getState() != searching )
 	{
 		command_available=true;
 	} else {
@@ -1973,19 +2005,19 @@ void cmd_ccFactoryReset()	// e<0-9>
 inline void getConfig()
 {
   if (ccmode == 0 || ccmode == 15) {
-   if (musterDec.MSeqEnabled == 0 || musterDec.MSenabled == 0) {
+   if (musterDecB.MSeqEnabled == 0 || musterDecB.MSenabled == 0) {
       MSG_PRINT(F("MS="));
-      MSG_PRINT(musterDec.MSenabled,DEC);
+      MSG_PRINT(musterDecB.MSenabled,DEC);
    }
-   else if (musterDec.MSenabled) {
+   else if (musterDecB.MSenabled) {
       MSG_PRINT(F("MSEQ=1"));
    }
    MSG_PRINT(F(";MU="));
-   MSG_PRINT(musterDec.MUenabled, DEC);
+   MSG_PRINT(musterDecB.MUenabled, DEC);
    MSG_PRINT(F(";MC="));
-   MSG_PRINT(musterDec.MCenabled, DEC);
+   MSG_PRINT(musterDecB.MCenabled, DEC);
    MSG_PRINT(F(";Mred="));
-   MSG_PRINT(musterDec.MredEnabled, DEC);
+   MSG_PRINT(musterDecB.MredEnabled, DEC);
   }
   else {
     MSG_PRINT(F("ccmode="));
@@ -1997,37 +2029,37 @@ inline void getConfig()
    if (RXenabled[radionr] == false) {
       MSG_PRINT(F(";RX=0"));
    }
-   if (toggleBankEnabled == true) {
-      MSG_PRINT(F(";toggleBank=1"));
-   }
+//   if (toggleBankEnabled == true) {
+//      MSG_PRINT(F(";toggleBank=1"));
+//   }
   if (ccmode == 0 || ccmode == 15) {
    MSG_PRINT(F("_MScnt="));
-   MSG_PRINT(musterDec.MsMoveCountmax, DEC);
-   if (musterDec.maxMuPrint < musterDec.maxMsgSize) {
+   MSG_PRINT(musterDecB.MsMoveCountmax, DEC);
+   if (musterDecB.maxMuPrint < musterDecB.maxMsgSize) {
       MSG_PRINT(F(";maxMuPrint="));
-      MSG_PRINT(musterDec.maxMuPrint, DEC);
+      MSG_PRINT(musterDecB.maxMuPrint, DEC);
    }
    MSG_PRINT(F(";maxMsgSize="));
-   MSG_PRINT(musterDec.maxMsgSize, DEC);
-   if (musterDec.MuSplitThresh > 0) {
+   MSG_PRINT(musterDecB.maxMsgSize, DEC);
+   if (musterDecB.MuSplitThresh > 0) {
       MSG_PRINT(F(";MuSplitThresh="));
-      MSG_PRINT(musterDec.MuSplitThresh, DEC);
+      MSG_PRINT(musterDecB.MuSplitThresh, DEC);
    }
-   if (musterDec.mcMinBitLen != mcMinBitLenDef) {
+   if (musterDecB.mcMinBitLen != mcMinBitLenDef) {
       MSG_PRINT(F(";mcMinBitLen="));
-      MSG_PRINT(musterDec.mcMinBitLen, DEC);
+      MSG_PRINT(musterDecB.mcMinBitLen, DEC);
    }
-   if (musterDec.cMaxNumPattern != CSetDef[5]) {
+   if (musterDecB.cMaxNumPattern != CSetDef[5]) {
       MSG_PRINT(F(";maxNumPat="));
-      MSG_PRINT(musterDec.cMaxNumPattern, DEC);
+      MSG_PRINT(musterDecB.cMaxNumPattern, DEC);
    }
-   if (musterDec.cMaxPulse != -maxPulse) {
+   if (musterDecB.cMaxPulse != -maxPulse) {
       MSG_PRINT(F(";maxPulse="));
-      MSG_PRINT(musterDec.cMaxPulse, DEC);
+      MSG_PRINT(musterDecB.cMaxPulse, DEC);
    }
    MSG_PRINT(F(";Mdebug="));
-   MSG_PRINT(musterDec.MdebEnabled, DEC);
-   if (musterDec.MdebEnabled) {
+   MSG_PRINT(musterDecB.MdebEnabled, DEC);
+   if (musterDecB.MdebEnabled) {
       MSG_PRINT(F(";MdebFifoLimit="));
       MSG_PRINT(MdebFifoLimit, DEC);
       MSG_PRINT(F("/"));
@@ -2043,25 +2075,25 @@ inline void configCMD()
   bool *bptr;
 
   if (cmdstring.charAt(2) == 'S') {  	  //MS
-	bptr=&musterDec.MSenabled;
+	bptr=&musterDecB.MSenabled;
   }
   else if (cmdstring.charAt(2) == 'U') {  //MU
-	bptr=&musterDec.MUenabled;
+	bptr=&musterDecB.MUenabled;
   }
   else if (cmdstring.charAt(2) == 'C') {  //MC
-	bptr=&musterDec.MCenabled;
+	bptr=&musterDecB.MCenabled;
 // }
 // else if (cmdstring.charAt(2) == 'R') {  //Mreduce
 //   bptr=&musterDec.MredEnabled;
   }
   else if (cmdstring.charAt(2) == 'D') {  //Mdebug
-	bptr=&musterDec.MdebEnabled;
+	bptr=&musterDecB.MdebEnabled;
   }
   else if (cmdstring.charAt(2) == 'L') {  //LED
 	bptr=&LEDenabled;
   }
   else if (cmdstring.charAt(2) == 'Q') {  //MSeq
-    bptr=&musterDec.MSeqEnabled;
+    bptr=&musterDecB.MSeqEnabled;
   }
 //  else if (cmdstring.charAt(2) == 'T') {  // toggleBankEnabled
 //	bptr=&toggleBankEnabled;
@@ -2080,7 +2112,7 @@ inline void configCMD()
 	unsuppCmd = true;
 	return;
   }
-  storeFunctions(musterDec.MSenabled, musterDec.MUenabled, musterDec.MCenabled, musterDec.MredEnabled, musterDec.MdebEnabled, LEDenabled, musterDec.MSeqEnabled, toggleBankEnabled);
+  storeFunctions(musterDecB.MSenabled, musterDecB.MUenabled, musterDecB.MCenabled, musterDecB.MredEnabled, musterDecB.MdebEnabled, LEDenabled, musterDecB.MSeqEnabled);
 }
 
 
@@ -2126,30 +2158,30 @@ inline void configSET()
 		MdebFifoLimit = val;
 	}
 	else if (n == 1) {			// mcmbl
-		musterDec.mcMinBitLen = val;
+		musterDecB.mcMinBitLen = val;
 	}
 	else if (n == 2) {			// mscnt
-		musterDec.MsMoveCountmax = val;
+		musterDecB.MsMoveCountmax = val;
 	}
 	else if (n == 3) {			//maxMuPrint
 		if (val == 0) {
 			val = 1;
 		}
-		musterDec.maxMuPrint = val * 256;
+		musterDecB.maxMuPrint = val * 256;
 	}
 	else if (n == 4) {			// 
 		if (val <=1 ) {
-			musterDec.maxMsgSize = 254;
+			musterDecB.maxMsgSize = 254;
 		}
 		else if (val * 256 > defMaxMsgSize) {
-			musterDec.maxMsgSize = defMaxMsgSize;
+			musterDecB.maxMsgSize = defMaxMsgSize;
 		}
 		else {
-			musterDec.maxMsgSize = val * 256;
+			musterDecB.maxMsgSize = val * 256;
 		}
 	}
 	else if (n == 5) {			// maxnumpat
-		musterDec.cMaxNumPattern = val;
+		musterDecB.cMaxNumPattern = val;
 	}
 //	else if (n == CSccN) {			// ccN
 //		ccN = val;
@@ -2159,14 +2191,14 @@ inline void configSET()
 		setCCmode();
 	}
 	else if (n == CSet16) {			// muthresh
-		musterDec.MuSplitThresh = val16;
+		musterDecB.MuSplitThresh = val16;
 	}
 	else if (n == CSet16+1) {			// maxpulse
 		if (val16 != 0) {
-			musterDec.cMaxPulse = -val16;
+			musterDecB.cMaxPulse = -val16;
 		}
 		else {
-			musterDec.cMaxPulse = -maxPulse;
+			musterDecB.cMaxPulse = -maxPulse;
 		}
 	}
 	else if (n != CSccN) {
@@ -2331,71 +2363,6 @@ void serialEvent()
   }
 }
 
-
-int freeRam () {
-#ifdef CMP_MEMDBG
-
- check_mem();
-
- MSG_PRINT("\nheapptr=[0x"); MSG_PRINT( (int) heapptr, HEX); MSG_PRINT("] (growing upward, "); MSG_PRINT( (int) heapptr, DEC); MSG_PRINT(" decimal)");
-
- MSG_PRINT("\nstackptr=[0x"); MSG_PRINT( (int) stackptr, HEX); MSG_PRINT("] (growing downward, "); MSG_PRINT( (int) stackptr, DEC); MSG_PRINT(" decimal)");
-
- MSG_PRINT("\ndifference should be positive: diff=stackptr-heapptr, diff=[0x");
- diff=stackptr-heapptr;
- MSG_PRINT( (int) diff, HEX); MSG_PRINT("] (which is ["); MSG_PRINT( (int) diff, DEC); MSG_PRINT("] (bytes decimal)");
-
-
- MSG_PRINT("\n\nLOOP END: get_free_memory() reports [");
- MSG_PRINT( get_free_memory() );
- MSG_PRINT("] (bytes) which must be > 0 for no heap/stack collision");
-
-
- // ---------------- Print memory profile -----------------
- MSG_PRINT("\n\n__data_start=[0x"); MSG_PRINT( (int) &__data_start, HEX ); MSG_PRINT("] which is ["); MSG_PRINT( (int) &__data_start, DEC); MSG_PRINT("] bytes decimal");
-
- MSG_PRINT("\n__data_end=[0x"); MSG_PRINT((int) &__data_end, HEX ); MSG_PRINT("] which is ["); MSG_PRINT( (int) &__data_end, DEC); MSG_PRINT("] bytes decimal");
-
- MSG_PRINT("\n__bss_start=[0x"); MSG_PRINT((int) & __bss_start, HEX ); MSG_PRINT("] which is ["); MSG_PRINT( (int) &__bss_start, DEC); MSG_PRINT("] bytes decimal");
-
- MSG_PRINT("\n__bss_end=[0x"); MSG_PRINT( (int) &__bss_end, HEX ); MSG_PRINT("] which is ["); MSG_PRINT( (int) &__bss_end, DEC); MSG_PRINT("] bytes decimal");
-
- MSG_PRINT("\n__heap_start=[0x"); MSG_PRINT( (int) &__heap_start, HEX ); MSG_PRINT("] which is ["); MSG_PRINT( (int) &__heap_start, DEC); MSG_PRINT("] bytes decimal");
-
- MSG_PRINT("\n__malloc_heap_start=[0x"); MSG_PRINT( (int) __malloc_heap_start, HEX ); MSG_PRINT("] which is ["); MSG_PRINT( (int) __malloc_heap_start, DEC); MSG_PRINT("] bytes decimal");
-
- MSG_PRINT("\n__malloc_margin=[0x"); MSG_PRINT( (int) &__malloc_margin, HEX ); MSG_PRINT("] which is ["); MSG_PRINT( (int) &__malloc_margin, DEC); MSG_PRINT("] bytes decimal");
-
- MSG_PRINT("\n__brkval=[0x"); MSG_PRINT( (int) __brkval, HEX ); MSG_PRINT("] which is ["); MSG_PRINT( (int) __brkval, DEC); MSG_PRINT("] bytes decimal");
-
- MSG_PRINT("\nSP=[0x"); MSG_PRINT( (int) SP, HEX ); MSG_PRINT("] which is ["); MSG_PRINT( (int) SP, DEC); MSG_PRINT("] bytes decimal");
-
- MSG_PRINT("\nRAMEND=[0x"); MSG_PRINT( (int) RAMEND, HEX ); MSG_PRINT("] which is ["); MSG_PRINT( (int) RAMEND, DEC); MSG_PRINT("] bytes decimal");
-
- // summaries:
- ramSize   = (int) RAMEND       - (int) &__data_start;
- dataSize  = (int) &__data_end  - (int) &__data_start;
- bssSize   = (int) &__bss_end   - (int) &__bss_start;
- heapSize  = (int) __brkval     - (int) &__heap_start;
- stackSize = (int) RAMEND       - (int) SP;
- freeMem1  = (int) SP           - (int) __brkval;
- freeMem2  = ramSize - stackSize - heapSize - bssSize - dataSize;
- MSG_PRINT("\n--- section size summaries ---");
- MSG_PRINT("\nram   size=["); MSG_PRINT( ramSize, DEC ); MSG_PRINT("] bytes decimal");
- MSG_PRINT("\n.data size=["); MSG_PRINT( dataSize, DEC ); MSG_PRINT("] bytes decimal");
- MSG_PRINT("\n.bss  size=["); MSG_PRINT( bssSize, DEC ); MSG_PRINT("] bytes decimal");
- MSG_PRINT("\nheap  size=["); MSG_PRINT( heapSize, DEC ); MSG_PRINT("] bytes decimal");
- MSG_PRINT("\nstack size=["); MSG_PRINT( stackSize, DEC ); MSG_PRINT("] bytes decimal");
- MSG_PRINT("\nfree size1=["); MSG_PRINT( freeMem1, DEC ); MSG_PRINT("] bytes decimal");
- MSG_PRINT("\nfree size2=["); MSG_PRINT( freeMem2, DEC ); MSG_PRINT("] bytes decimal");
-#else
-  extern int __heap_start, *__brkval;
-  int v;
-  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
-#endif // CMP_MEMDBG
-
- }
-
 inline unsigned long getUptime()
 {
 	unsigned long now = millis();
@@ -2526,31 +2493,33 @@ void setCCmode() {
 
 //================================= EEProm commands ======================================
 
-void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t deb, int8_t led, int8_t mseq, int8_t tgBank)
+void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t deb, int8_t led, int8_t mseq)
 {
+	// res mseq led deb red mc mu ms  (7 .. 0)
 	mu=mu<<1;
 	mc=mc<<2;
 	red=red<<3;
 	deb=deb<<4;
 	led=led<<5;
 	mseq=mseq<<6;
-	tgBank=tgBank<<7;
-	int8_t dat =  ms | mu | mc | red | deb | led | mseq | tgBank;
-	tools::EEwrite(addr_features,dat);
+	
+	int8_t dat =  ms | mu | mc | red | deb | led | mseq;
+	tools::EEwrite(addr_featuresB,dat);
 	tools::EEstore();
 }
 
 void callGetFunctions(void)
 {
-	 getFunctions(&musterDec.MSenabled, &musterDec.MUenabled, &musterDec.MCenabled, &musterDec.MredEnabled, &musterDec.MdebEnabled, &LEDenabled, &musterDec.MSeqEnabled, &toggleBankEnabled);
+	 getFunctions(&musterDecB.MSenabled, &musterDecB.MUenabled, &musterDecB.MCenabled, &musterDecB.MredEnabled, &musterDecB.MdebEnabled, &LEDenabled, &musterDecB.MSeqEnabled);
 }
 
-void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *mseq, bool *tgBank)
+void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *mseq)
 {
     uint8_t high;
     uint8_t val;
-    int8_t dat = tools::EEread(addr_features);
+    int8_t dat = tools::EEread(addr_featuresB);
 
+    // res mseq led deb red mc mu ms  (7 .. 0)
     *ms=bool (dat &(1<<0));
     *mu=bool (dat &(1<<1));
     *mc=bool (dat &(1<<2));
@@ -2558,38 +2527,37 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     *deb=bool (dat &(1<<4));
     *led=bool (dat &(1<<5));
     *mseq=bool (dat &(1<<6));
-    *tgBank=bool (dat &(1<<7));
     
     MdebFifoLimit = tools::EEread(CSetAddr[0]);
-    musterDec.MsMoveCountmax = tools::EEread(CSetAddr[2]);
+    musterDecB.MsMoveCountmax = tools::EEread(CSetAddr[2]);
     val = tools::EEread(CSetAddr[3]);
     if (val == 0) {
        val = 1;
     }
-    musterDec.maxMuPrint = val * 256;
+    musterDecB.maxMuPrint = val * 256;
     val = tools::EEread(CSetAddr[4]);
     if (val <=1 ) {
-       musterDec.maxMsgSize = 254;
+       musterDecB.maxMsgSize = 254;
     }
     else if (val * 256 > defMaxMsgSize) {
-       musterDec.maxMsgSize = defMaxMsgSize;
+       musterDecB.maxMsgSize = defMaxMsgSize;
     }
     else {
-       musterDec.maxMsgSize = val * 256;
+       musterDecB.maxMsgSize = val * 256;
     }
-    musterDec.cMaxNumPattern = tools::EEread(CSetAddr[5]);
+    musterDecB.cMaxNumPattern = tools::EEread(CSetAddr[5]);
 
     high = tools::EEread(CSetAddr[CSet16]);
-    musterDec.MuSplitThresh = tools::EEread(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
+    musterDecB.MuSplitThresh = tools::EEread(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
     high = tools::EEread(CSetAddr[CSet16+2]);
-    musterDec.cMaxPulse = tools::EEread(CSetAddr[CSet16+3]) + ((high << 8) & 0xFF00);
-    if (musterDec.cMaxPulse == 0) {
-       musterDec.cMaxPulse = maxPulse;
+    musterDecB.cMaxPulse = tools::EEread(CSetAddr[CSet16+3]) + ((high << 8) & 0xFF00);
+    if (musterDecB.cMaxPulse == 0) {
+       musterDecB.cMaxPulse = maxPulse;
     }
-    musterDec.cMaxPulse = -musterDec.cMaxPulse;
-    musterDec.mcMinBitLen = tools::EEread(CSetAddr[1]);
-    if (musterDec.mcMinBitLen == 0) {
-        musterDec.mcMinBitLen = mcMinBitLenDef;
+    musterDecB.cMaxPulse = -musterDecB.cMaxPulse;
+    musterDecB.mcMinBitLen = tools::EEread(CSetAddr[1]);
+    if (musterDecB.mcMinBitLen == 0) {
+        musterDecB.mcMinBitLen = mcMinBitLenDef;
     }
 }
 
@@ -2654,7 +2622,8 @@ void initEthernetConfig(void)
 
 void initEEPROMconfig(void)
 {
-	tools::EEwrite(addr_features, 0x37);    	// Init EEPROM with all flags enabled, except red, nn and toggleBank
+	tools::EEwrite(addr_featuresA, 0x37);    	// Init EEPROM with all flags enabled, except red, nn and toggleBank
+	tools::EEwrite(addr_featuresB, 0x37);    	// Init EEPROM with all flags enabled, except red, nn and toggleBank
 	
 	for (uint8_t i = 0; i < CSetAnzEE; i++) {
 		tools::EEwrite(CSetAddr[i], CSetDef[i]);
@@ -2686,7 +2655,6 @@ void initEEPROM(void)
 
   } else {
     initEEPROMconfig();
-    //storeFunctions(1, 1, 1);    // Init EEPROM with all flags enabled
     #ifdef CMP_CC1101
        if (tools::EEread(EE_MAGIC_OFFSET) != VERSION_1) {  // ccFactoryReset nur wenn VERSION_1 nicht passt
           cc1101::ccFactoryReset();	// nur Bank 0
