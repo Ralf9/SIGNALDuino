@@ -115,6 +115,7 @@ public:
 	uint8_t cMaxNumPattern;
 	int16_t cMaxPulse;
 	bool printMsgSuccess;
+	bool hasCC1101;
 	
 	uint16_t histo[maxNumPattern];
 	//uint8_t message[defMaxMsgSize];

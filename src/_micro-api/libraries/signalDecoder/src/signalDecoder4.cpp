@@ -3,7 +3,7 @@
 *   Library to decode radio signals based on patternd detection
 *   2014-2015  N.Butzek, S.Butzek
 *   2015-2017  S.Butzek
-*   2020 Ralf9
+*   2020-2021  Ralf9
 
 *   This library contains classes to perform decoding of digital signals
 *   typical for home automation. The focus for the moment is on different sensors
@@ -194,7 +194,7 @@ inline void SignalDetectorClass::doDetect()
 		}
 		else if (messageLen == minMessageLen) {
 			state = detecting;  // Set state to detecting, because we have more than minMessageLen data gathered, so this is no noise
-			if (_rssiCallback != NULL) 
+			if (hasCC1101 && _rssiCallback != NULL) 
 				rssiValue = _rssiCallback();
 		}
 
@@ -466,7 +466,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 	  }
 
 #if DEBUGDECODE >1
-		DBG_PRINT("msgRec state="); DBG_PRINTLN(state)
+		DBG_PRINT("msgRec state="); DBG_PRINT(state); DBG_PRINT(" msglen="); DBG_PRINTLN(messageLen);
 #endif
 		
 #if DEBUGDETECT >= 1
@@ -534,12 +534,13 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 			//}
 
 #ifdef DEBUGDECODE
-			DBG_PRINT("Index: ");
-			DBG_PRINT(" MStart: "); DBG_PRINT(mstart);
-			DBG_PRINT(" SYNC: "); DBG_PRINT(sync);
-			DBG_PRINT(", CP: "); DBG_PRINT(clock);
-			DBG_PRINT(" - MEnd: "); DBG_PRINT(mend);
-			DBG_PRINT(F(" msglen=")); DBG_PRINTLN(messageLen);
+			DBG_PRINT(F("Index: "));
+			DBG_PRINT(F(" MStart=")); DBG_PRINT(mstart);
+			DBG_PRINT(F(" SYNC=")); DBG_PRINT(sync);
+			DBG_PRINT(F(" CP=")); DBG_PRINT(clock);
+			DBG_PRINT(F(" - MEnd(")); DBG_PRINT(m_endfound); DBG_PRINT(")="); DBG_PRINT(mend);
+			DBG_PRINT(F(" msglen=")); DBG_PRINT(messageLen);
+			DBG_PRINT(F(" - p_val=")); DBG_PRINTLN(p_valid);
 			
 #endif // DEBUGDECODE
 		  if ((m_endfound && (mend - mstart) >= minMessageLen) || (!m_endfound && (messageLen - mstart) >= minMessageLen))
@@ -616,8 +617,10 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					MSG_PRINT("C");  MSG_PRINT(clock, HEX);  MSG_PRINT(SERIAL_DELIMITER);
 					MSG_PRINT("S");  MSG_PRINT(sync, HEX);  MSG_PRINT(SERIAL_DELIMITER);
 					#ifdef CMP_CC1101
-					  MSG_PRINT("R");  MSG_PRINT(rssiValue, HEX);  MSG_PRINT(SERIAL_DELIMITER);
-					#endif				
+					if (hasCC1101) {
+						MSG_PRINT("R");  MSG_PRINT(rssiValue, HEX);  MSG_PRINT(SERIAL_DELIMITER);
+					}
+					#endif
 			        }
 				else {
 					char msbuf[15];
@@ -691,8 +694,10 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 						n = sprintf(msbuf, ";CP=%x;SP=%x;", clock, sync); // ClockPulse & SyncPulse
 						MSG_PRINT(msbuf);
 						#ifdef CMP_CC1101
-						n = sprintf(msbuf, "R=%u;", rssiValue);     // Signal Level (RSSI)
-						MSG_PRINT(msbuf);
+						if (hasCC1101) {
+							n = sprintf(msbuf, "R=%u;", rssiValue);     // Signal Level (RSSI)
+							MSG_PRINT(msbuf);
+						}
 						#endif
 						if (msEqCnt > 0) {
 							MSG_PRINT(F("Q;"));
@@ -771,9 +776,10 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 				//m_truncated = true;  // Flag that we truncated the message array and want to receiver some more data
 				//success = true;	// don't process other message types
 			}
-			else {
+			else {	// kein Ende gefunden und p_valid = 2 ist
 #ifdef DEBUGDECODE
 				MSG_PRINTLN(F(" Buffer overflow, flushing message array"));
+				printOut();
 #endif
 				//MSG_PRINT(MSG_START);
 				//MSG_PRINT("Buffer overflow while processing signal");
@@ -883,7 +889,9 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					MSG_PRINT("C="); MSG_PRINT(mcdecoder.clock); MSG_PRINT(SERIAL_DELIMITER);
 					MSG_PRINT("L="); MSG_PRINT(mcdecoder.ManchesterBits.valcount); MSG_PRINT(SERIAL_DELIMITER);*/
 					#ifdef CMP_CC1101
-					  MSG_PRINT("R=");  MSG_PRINT(rssiValue); MSG_PRINT(SERIAL_DELIMITER);     // Signal Level (RSSI)
+					if (hasCC1101) {
+						MSG_PRINT("R=");  MSG_PRINT(rssiValue); MSG_PRINT(SERIAL_DELIMITER);     // Signal Level (RSSI)
+					}
 					#endif
 					if (MdebEnabled) {
 						if (mcValid == false) {
@@ -1055,7 +1063,9 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					MSG_PRINT(SERIAL_DELIMITER);
 					MSG_PRINT("C");  MSG_PRINT(clock, HEX);  MSG_PRINT(SERIAL_DELIMITER);
 					#ifdef CMP_CC1101
-					  MSG_PRINT("R");  MSG_PRINT(rssiValue, HEX);  MSG_PRINT(SERIAL_DELIMITER);
+					if (hasCC1101) {
+						MSG_PRINT("R");  MSG_PRINT(rssiValue, HEX);  MSG_PRINT(SERIAL_DELIMITER);
+					}
 					#endif		
 					MSG_PRINT(SERIAL_DELIMITER);
 				  }
@@ -1073,8 +1083,10 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					n = sprintf(buf, "CP=%x;", clock);
 					MSG_PRINT(buf);
 					#ifdef CMP_CC1101
+					if (hasCC1101) {
 						n = sprintf(buf, "R=%u;", rssiValue);	// Signal Level (RSSI)
 						MSG_PRINT(buf);
+					}
 					#endif
 					
 					MSG_PRINT("D=");
@@ -1563,7 +1575,7 @@ ManchesterpatternDecoder::~ManchesterpatternDecoder()
 */
 void ManchesterpatternDecoder::reset()
 {
-#if MCDEBUGDECODE > 2
+#if MCDEBUGDECODE > 3
 	DBG_PRINT("mcrst:");
 #endif
 	longlow =   -1;
@@ -1724,9 +1736,9 @@ const bool ManchesterpatternDecoder::doDecode() {
 #endif
 	uint8_t bit = 0;
 	uint8_t pulseid;
-	#ifdef DEBUGDECODE
-	char value = NULL;
-	#endif
+	//#ifdef DEBUGDECODE
+	//char value = NULL;
+	//#endif
 	while (i < pdec->messageLen-30)
 	{
 	  pdec->mcValid = true;
@@ -1847,7 +1859,7 @@ const bool ManchesterpatternDecoder::doDecode() {
 				return false;
 			}
 			ManchesterBits.reset();		// weiter suchen
-#if MCDEBUGDECODE > 1
+#if MCDEBUGDECODE > 2
 			DBG_PRINT("mcResMpos=");
 			DBG_PRINTLN(i);
 #endif
