@@ -7,7 +7,8 @@
 *   there is an option to send almost any data over a send raw interface
 *   2014-2015  N.Butzek, S.Butzek
 *   2016 S.Butzek
-
+*   2020-2021 Ralf9
+*
 *   This software focuses on remote sensors like weather sensors (temperature,
 *   humidity Logilink, TCM, Oregon Scientific, ...), remote controlled power switches
 *   (Intertechno, TCM, ARCtech, ...) which use encoder chips like PT2262 and
@@ -28,21 +29,17 @@
 *   You should have received a copy of the GNU General Public License
 *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-	Version from: https://github.com/Ralf9/SIGNALDuino/blob/dev-r412_cc1101
+* Version from: https://github.com/Ralf9/SIGNALDuino/blob/dev-r412_cc1101
 
-*-------------------------------------------------------------------------------------------------------------------
-	
+*------------------------------------------------------------------------------------------
+
+*-----  es ist der core 1.9.0 erforderlich ------
 */
 
 #include "compile_config.h"
 
-// *** bitte auch das "#define LAN_WIZ 1" in der SignalDecoder.h beachten ***
-// *** nur bei core 1.8.0: bitte auch das "#define LAN_WIZ 1" in der USBD_reenumerate.c beachten ***
-
-// bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten
-
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.1.2-dev210102"
+#define PROGVERS               "4.1.2-dev210107"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -72,7 +69,6 @@
 #endif
 
 //#define WATCHDOG	1 // Der Watchdog ist in der Entwicklungs und Testphase deaktiviert. Es muss auch ohne Watchdog stabil funktionieren.
-//(#define SENDTODECODER 1) ist neu ccmode=15 -> damit wird in der send_raw Routine anstatt zu senden, die Pulse direkt dem Decoder uebergeben
 
 #define DEBUG                  1
 
@@ -175,7 +171,7 @@ volatile unsigned long lastTimeA = micros();
 volatile unsigned long lastTimeB = micros();
 volatile bool lastFifoALowMax = false;
 volatile bool lastFifoBLowMax = false;
-bool hasCC1101 = false;
+bool hasCC1101;
 bool LEDenabled = true;
 //bool toggleBankEnabled = false;
 bool RXenabled[] = {false, false, false, false};	// true - enable receive, Zwischenspeicher zum enablereceive merken
@@ -183,7 +179,8 @@ bool RXenabledSlowRfA = false;
 bool RXenabledSlowRfB = false;
 bool unsuppCmd = false;
 bool CmdOk = false;
-uint8_t MdebFifoLimit = 120;
+uint8_t MdebFifoLimitA = 120;
+uint8_t MdebFifoLimitB = 120;
 uint8_t bank = 0;
 uint16_t bankOffset = 0;
 //uint8_t ccN = 0;
@@ -222,11 +219,11 @@ void cmd_writeEEPROM();
 void cmd_writePatable();
 void changeReceiver();
 
-//typedef void (* GenericFP)(int); //function pointer prototype to a function which takesaddr_ccN an 'int' an returns 'void'
+//typedef void (* GenericFP)(int); //function pointer prototype to a function which takes an 'int' an returns 'void'
 #define cmdAnz 23
 const char cmd0[] =  {'?', '?', 'b', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'e', 'e', 'P', 'r', 'R', 'S', 't', 'T', 'V', 'W', 'x', 'X', 'X'};
 const char cmd1[] =  {'S', ' ', ' ', 'E', 'D', 'G', 'R', 'S', 'W', ' ', 'C', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'E', 'Q'};
-const bool cmdCC[] = {  0,   0,   0,   0,   0,   0,   0,   0,   1,   1,   0,   1,   0,   0,   0,   0,   0,   0,   0,   0,   1,   0,  0 };
+const bool cmdCC[] = {  0,   0,   0,   0,   0,   0,  1,   0,   1,   1,   0,   1,   0,   0,   0,   0,   0,   0,   0,   0,   1,   0,  0 };
 void (*cmdFP[])(void) = {
 		cmd_help_S, // ?S
 		cmd_help,	// ?
@@ -253,28 +250,32 @@ void (*cmdFP[])(void) = {
 		changeReceiver	// XQ
 		};
 
-#define CSetAnz 10
-#define CSetAnzEE 12
-#define CSet16 8
-#define CSccN 6
-#define CSccmode 7
+#define CSetAnz 14
+#define CSetAnzEE 15
+#define CSet16 13
+#define CSccN 0
+#define CSccmode 1
 
-//const char *CSetCmd[] = {"fifolimit", "mcmbl", "mscnt", "maxMuPrintx256", "maxMsgSizex256", "maxnumpat", "ccN",    "ccmode", "muthresh", "L",  "maxpulse", "L"  };
-const uint8_t CSetAddr[] = {  0xf0,     0xf1,     0xf2,          0xf3,           0xf4,            0xf5,   addr_ccN, addr_ccmode,     0xf8,  0xf9,  0xfa,     0xfb };
-const uint8_t CSetDef[] =  {    150,       0,        4,             3,              4,               8,          0,           0,        0,     0,     0,        0 };
+//const char *CSetCmd[] = {  ccN        ccmode  mcmbl mscnt fifolimit maxMu..x256 m..Sizex256 fifolimitA maxMu..x256A m..Sizex256A onlyRXB maxnumpat muthreshx256 maxpulse,L};
+const uint8_t CSetAddr[] = {addr_ccN,addr_ccmode, 0xf0, 0xf1,    0xf2,       0xf3,       0xf4,      0xf5,        0xf6,        0xf7,   0xf8,     0xf9,       0xfa, 0xfb, 0xfc};
+const uint8_t CSetDef[] =  {   0,          0,        0,    4,     150,          3,          4,       150,           3,           4,      0,        8,          0,    0,    0};
 
-const char string_0[] PROGMEM = "fifolimit";
-const char string_1[] PROGMEM = "mcmbl";
-const char string_2[] PROGMEM = "mscnt";
-const char string_3[] PROGMEM = "maxMuPrintx256";
-const char string_4[] PROGMEM = "maxMsgSizex256";
-const char string_5[] PROGMEM = "maxnumpat";
-const char string_6[] PROGMEM = "ccN";
-const char string_7[] PROGMEM = "ccmode";
-const char string_8[] PROGMEM = "muthresh";
-const char string_9[] PROGMEM = "maxpulse";
+const char string_0[] PROGMEM = "ccN";
+const char string_1[] PROGMEM = "ccmode";
+const char string_2[] PROGMEM = "mcmbl";
+const char string_3[] PROGMEM = "mscnt";
+const char string_4[] PROGMEM = "fifolimit";
+const char string_5[] PROGMEM = "maxMuPrintx256";
+const char string_6[] PROGMEM = "maxMsgSizex256";
+const char string_7[] PROGMEM = "fifolimitA";
+const char string_8[] PROGMEM = "maxMuPrintx256A";
+const char string_9[] PROGMEM = "maxMsgSizex256A";
+const char string_10[] PROGMEM = "onlyRXB";
+const char string_11[] PROGMEM = "maxnumpat";
+const char string_12[] PROGMEM = "muthreshx256";
+const char string_13[] PROGMEM = "maxpulse";
 
-const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6, string_7, string_8, string_9};
+const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6, string_7, string_8, string_9, string_10, string_11, string_12, string_13};
 
 void handleInterrupt();
 void enableReceive();
@@ -292,7 +293,8 @@ void print_Bank();
 void print_radio_sum();
 uint16_t getBankOffset(uint8_t tmpBank);
 uint8_t radioDetekt(bool confmode, uint8_t Dstat);
-void printHex2(const byte hex);
+void printHex2(const uint8_t hex);
+void setHasCC1101(uint8_t val);
 uint8_t rssiCallback() { return 0; };	// Dummy return if no rssi value can be retrieved from receiver
 
 
@@ -306,9 +308,9 @@ void setup() {
 #ifdef DEBUG_BackupReg
 	sichBackupReg = (uint8_t)getBackupRegister(RTC_BKP_INDEX);
 #endif
-tools::EEbufferFill();
-getEthernetConfig();
-pinAsOutput(PIN_LED);
+	tools::EEbufferFill();
+	getEthernetConfig();
+	pinAsOutput(PIN_LED);
 #ifdef LAN_WIZ
 	digitalWrite(PIN_LED, LOW);
 	digitalWrite(PIN_WIZ_RST, LOW);		// RESET should be heldlowat least 500 us for W5500
@@ -390,13 +392,15 @@ pinAsOutput(PIN_LED);
 #ifdef WATCHDOG
 	wdt_reset();
 #endif
+	setHasCC1101(tools::EEread(CSetAddr[10]));	// onlyRXB - keine cc1101
 #ifdef CMP_CC1101
-	cc1101::setup();
+	if (hasCC1101) cc1101::setup();
 #endif
   	initEEPROM();
-#ifdef CMP_CC1101
-	MSG_PRINTLN(F("CCInit"));
 	uint8_t statRadio;
+#ifdef CMP_CC1101
+  if (hasCC1101) {
+	MSG_PRINTLN(F("CCInit"));
 	for (radionr = 0; radionr < 4; radionr++) {		// init radio
 		statRadio = tools::EEread(addr_statRadio + radionr);
 		if (statRadio == 0xFF) {
@@ -414,6 +418,13 @@ pinAsOutput(PIN_LED);
 			tools::EEstore();
 		}
 	}
+  }
+  else {
+	radio_bank[0] = defStatRadio;
+	radio_bank[1] = 0;
+	radio_bank[2] = defStatRadio;
+	radio_bank[3] = defStatRadio;
+  }
 	
 //	if (radio_bank[remRadionr] < 10)
 //	{
@@ -441,8 +452,7 @@ pinAsOutput(PIN_LED);
 #endif
 	cmdstring.reserve(maxCmdString);
 
-	hasCC1101 = true;
-
+  if (hasCC1101) {
 	for (radionr = 0; radionr < 4; radionr++) {	// enableReceive bei allen korrekt erkannten radios denen eine Bank zugeordnet ist
 		statRadio = radio_bank[radionr];
 		if (statRadio < 10) {
@@ -466,6 +476,17 @@ pinAsOutput(PIN_LED);
 			RXenabled[radionr] = true;
 		}
 	}
+  }
+  else {	// onlyRXB
+	radionr = 1;
+	ccmode = tools::EEread(addr_ccmode);
+	if (tools::EEread(addr_rxRes) != 0xA5) {	// wenn A5 dann bleibt rx=0
+		en_dis_receiver(true);
+	}
+	if (ccmode == 0) {
+		pinAsOutput(PIN_SEND);
+	}
+  }
 	MSG_PRINTLN("");
 	getSelRadioBank();
 }
@@ -534,9 +555,19 @@ void cronjob() {
 			getUptime();
 		}
 	}
-
 }
 
+
+void setHasCC1101(uint8_t val) {
+	if (val == 1) {
+		hasCC1101 = false;	// onlyRXB - keine cc1101
+	}
+	else {
+		hasCC1101 = true;
+	}
+	//musterDecA.hasCC1101 = hasCC1101;
+	musterDecB.hasCC1101 = hasCC1101;
+}
 
 #ifdef DEBUG_BackupReg
 void setBackupReg(uint32_t n) {
@@ -595,7 +626,7 @@ void loop() {
 			/*state = musterDecA.decode(&aktVal);
 			if (musterDecA.MdebEnabled && musterDecA.printMsgSuccess) {
 				fifoCount = FiFoA.count();
-				if (fifoCount > MdebFifoLimit) {
+				if (fifoCount > MdebFifoLimitA) {
 					MSG_PRINT(F("MFa="));
 					MSG_PRINTLN(fifoCount, DEC);
 				}
@@ -613,7 +644,7 @@ void loop() {
 			state = musterDecB.decode(&aktVal);
 			if (musterDecB.MdebEnabled && musterDecB.printMsgSuccess) {
 				fifoCount = FiFoB.count();
-				if (fifoCount > MdebFifoLimit) {
+				if (fifoCount > MdebFifoLimitB) {
 					MSG_PRINT(F("MF="));
 					MSG_PRINTLN(fifoCount, DEC);
 				}
@@ -1248,11 +1279,13 @@ void HandleCommand()
 	setBackupReg(8);
 #endif
 	for (i=0; i < cmdAnz; i++) {
+	  if (hasCC1101 || cmdCC[i] == 0) {
 		if (cmdstring.charAt(0) == cmd0[i]) {
 			if (cmd1[i] == ' ' || (cmdstring.charAt(1) == cmd1[i])) {
 				break;
 			}
 		}
+	  }
 	}
 	//MSG_PRINT(i);
 	unsuppCmd = false;
@@ -1377,7 +1410,7 @@ void cmd_bank()
 			}
 			if (cmdstring.charAt(0) != 'e') {
 				print_Bank();
-				cc1101::CCinit();
+				if (hasCC1101) cc1101::CCinit();
 				setCCmode();
 			}
 		}
@@ -1438,6 +1471,9 @@ void print_ccconf(uint16_t bankOffs)
 {
 	char hexString[6];
 	
+	if (hasCC1101 == false) {
+		return;
+	}
 	MSG_PRINT(F(" sync="));
 	printHex2(tools::EEread(bankOffs + 2 + CC1101_SYNC1));
 	printHex2(tools::EEread(bankOffs + 2 + CC1101_SYNC0));
@@ -1540,7 +1576,7 @@ void print_bank_sum()	// bs - Banksummary
 	for (i = 0; i <= 9; i++) {
 		i2 = i * 2;	
 		if (Nstr[i2] != '-') {		// Bank Aktiv?
-			if (ccmodeStr[i2] == '0') {
+			if (ccmodeStr[i2] == '0' && tools::EEread(addr_bankdescr + (i * 8)) == 0) {
 				strcpy(bankStr, "SlowRF");
 				j = 6;
 			}
@@ -1559,7 +1595,7 @@ void print_bank_sum()	// bs - Banksummary
 					}
 				}
 			}
-			if (j > 3) {
+			if (j > 0) {
 				bankStr[8] = 0;
 				MSG_PRINT(F(" "));
 				MSG_PRINT(i);		// BankNr
@@ -1702,17 +1738,22 @@ void cmd_freeRam()	// R: FreeMemory
 
 void cmd_send()
 {
-	if (musterDecB.getState() != searching )
+	/*if (musterDecB.getState() != searching )
 	{
 		command_available=true;
-	} else {
+	} else {*/
 		if (cmdstring.charAt(1) != 'N') {
 			send_cmd(); // Part of Send
 		}
 		else {
-			send_ccFIFO();
+			if (hasCC1101) {
+				send_ccFIFO();
+			}
+			else {
+				unsuppCmd = true;
+			}
 		}
-	}
+	//}
 }
 
 void cmd_uptime()	// t: Uptime
@@ -1962,11 +2003,19 @@ void cmd_configFactoryReset()	// eC - initEEPROMconfig
 	initEEPROMconfig();
 	callGetFunctions();
 	radionr = defSelRadio;
-	statRadio = tools::EEread(addr_statRadio + defSelRadio);
-	statRadio = radioDetekt(false, statRadio);
+	if (hasCC1101 == false) {	// onlyRXB
+		tools::EEwrite(CSetAddr[10], 1);
+		tools::EEwrite(addr_bankdescr, 0);
+		tools::EEstore();
+		statRadio = 0;
+	}
+	else {
+		statRadio = tools::EEread(addr_statRadio + defSelRadio);
+		statRadio = radioDetekt(false, statRadio);
+	}
 	if (statRadio == 0) {				// ist dem Radio Bank 0 zugeordnet?
 		getSelRadioBank();
-		cc1101::CCinit_reg();
+		if (hasCC1101) cc1101::CCinit_reg();
 		RXenabled[radionr] = true;
 		setCCmode();
 	}
@@ -1985,13 +2034,16 @@ void cmd_ccFactoryReset()	// e<0-9>
          if (cmdstring.charAt(0) == 'e' && isDigit(cmdstring.charAt(1))) {
             cmd_bank();
          }
-         cc1101::ccFactoryReset();
-         cc1101::CCinit();
+         if (hasCC1101) {
+            cc1101::ccFactoryReset();
+            cc1101::CCinit();
+         }
          tools::EEbankWrite(addr_ccN, 0);
          //ccN = 0;
          ccmode = 0;
          tools::EEbankWrite(addr_ccmode, ccmode);
          setCCmode();
+         tools::EEwrite(addr_bankdescr + (bank * 8), 0);
          if (bank > 0) {
             tools::EEbankWrite(0, bank);
             tools::EEbankWrite(1, (255 - bank));
@@ -2061,10 +2113,13 @@ inline void getConfig()
    MSG_PRINT(musterDecB.MdebEnabled, DEC);
    if (musterDecB.MdebEnabled) {
       MSG_PRINT(F(";MdebFifoLimit="));
-      MSG_PRINT(MdebFifoLimit, DEC);
+      MSG_PRINT(MdebFifoLimitB, DEC);
       MSG_PRINT(F("/"));
       MSG_PRINT(FIFO_LENGTH, DEC);
    }
+  }
+  if (hasCC1101 == false) {
+     MSG_PRINT(F(";onlyRXB=1"))
   }
    MSG_PRINTLN("");
 }
@@ -2154,22 +2209,35 @@ inline void configSET()
 		n++;
 	}
 	
-	if (n == 0) {  				// fifolimit
-		MdebFifoLimit = val;
+	if (n == CSccmode) {		// ccmode
+		if (hasCC1101 == false && (val > 1 || val < 15)) {	// bei onlyrxb ist nur 0 oder 15 zulaessig
+			val = 0;
+		}
+		ccmode = val;
+		setCCmode();
 	}
-	else if (n == 1) {			// mcmbl
+	if (n == 0) {  				// fifolimit
+		MdebFifoLimitB = val;
+	}
+	else if (n == 2) {			// mcmbl
 		musterDecB.mcMinBitLen = val;
 	}
-	else if (n == 2) {			// mscnt
+	else if (n == 3) {			// mscnt
 		musterDecB.MsMoveCountmax = val;
 	}
-	else if (n == 3) {			//maxMuPrint
+	else if (n == 4) {  		// fifolimit
+		MdebFifoLimitB = val;
+	}
+	else if (n == 5) {			// maxMuPrintx256
 		if (val == 0) {
 			val = 1;
 		}
+		if (val * 256 > musterDecB.maxMsgSize) {
+			val = tools::EEread(CSetAddr[6]);
+		}
 		musterDecB.maxMuPrint = val * 256;
 	}
-	else if (n == 4) {			// 
+	else if (n == 6) {			// maxMsgSizex256
 		if (val <=1 ) {
 			musterDecB.maxMsgSize = 254;
 		}
@@ -2180,18 +2248,21 @@ inline void configSET()
 			musterDecB.maxMsgSize = val * 256;
 		}
 	}
-	else if (n == 5) {			// maxnumpat
+	else if (n == 7) {  		// fifolimitA
+		MdebFifoLimitA = val;
+	}
+	
+	else if (n == 10) {  		// onlyRXB - keine cc1101
+		setHasCC1101(val);	// onlyRXB - keine cc1101
+	}
+	else if (n == 11) {			// maxnumpat
 		musterDecB.cMaxNumPattern = val;
 	}
-//	else if (n == CSccN) {			// ccN
-//		ccN = val;
-//	}
-	else if (n == CSccmode) {			// ccmode
-		ccmode = val;
-		setCCmode();
-	}
-	else if (n == CSet16) {			// muthresh
-		musterDecB.MuSplitThresh = val16;
+	else if (n == 12) {			// muthreshx256
+		if (val * 256 > maxPulse) {
+			val = 125;
+		}
+		musterDecB.MuSplitThresh = val * 256;
 	}
 	else if (n == CSet16+1) {			// maxpulse
 		if (val16 != 0) {
@@ -2483,7 +2554,7 @@ void setCCmode() {
   }
 }
 
-  void printHex2(const byte hex) {   // Todo: printf oder scanf nutzen
+  void printHex2(const uint8_t hex) {   // Todo: printf oder scanf nutzen
     if (hex < 16) {
       MSG_PRINT("0");
     }
@@ -2528,14 +2599,15 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     *led=bool (dat &(1<<5));
     *mseq=bool (dat &(1<<6));
     
-    MdebFifoLimit = tools::EEread(CSetAddr[0]);
-    musterDecB.MsMoveCountmax = tools::EEread(CSetAddr[2]);
-    val = tools::EEread(CSetAddr[3]);
+    MdebFifoLimitB = tools::EEread(CSetAddr[4]);
+    MdebFifoLimitA = tools::EEread(CSetAddr[7]);
+    musterDecB.MsMoveCountmax = tools::EEread(CSetAddr[3]);	// mscnt
+    val = tools::EEread(CSetAddr[5]);	// maxMuPrintx256
     if (val == 0) {
        val = 1;
     }
     musterDecB.maxMuPrint = val * 256;
-    val = tools::EEread(CSetAddr[4]);
+    val = tools::EEread(CSetAddr[6]);	// maxMsgSizex256
     if (val <=1 ) {
        musterDecB.maxMsgSize = 254;
     }
@@ -2545,17 +2617,23 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     else {
        musterDecB.maxMsgSize = val * 256;
     }
-    musterDecB.cMaxNumPattern = tools::EEread(CSetAddr[5]);
+    
+    musterDecB.cMaxNumPattern = tools::EEread(CSetAddr[11]);	// maxnumpat
 
+    val = tools::EEread(CSetAddr[12]);
+    if (val * 256 > maxPulse) {
+        val = 125;
+    }
+    musterDecB.MuSplitThresh = val * 256;
+    
     high = tools::EEread(CSetAddr[CSet16]);
-    musterDecB.MuSplitThresh = tools::EEread(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
-    high = tools::EEread(CSetAddr[CSet16+2]);
-    musterDecB.cMaxPulse = tools::EEread(CSetAddr[CSet16+3]) + ((high << 8) & 0xFF00);
+    musterDecB.cMaxPulse = tools::EEread(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
     if (musterDecB.cMaxPulse == 0) {
        musterDecB.cMaxPulse = maxPulse;
     }
     musterDecB.cMaxPulse = -musterDecB.cMaxPulse;
-    musterDecB.mcMinBitLen = tools::EEread(CSetAddr[1]);
+
+    musterDecB.mcMinBitLen = tools::EEread(CSetAddr[2]);	// mcmbl
     if (musterDecB.mcMinBitLen == 0) {
         musterDecB.mcMinBitLen = mcMinBitLenDef;
     }
