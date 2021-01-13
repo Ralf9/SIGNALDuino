@@ -39,7 +39,7 @@
 #include "compile_config.h"
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.1.2-dev210107"
+#define PROGVERS               "4.1.2-dev210113"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -88,16 +88,32 @@
 //---------------------------------------------------------------------------------------------
 
 #include "cc1101.h"
-#include "FastDelegate.h"
+//#include "FastDelegate.h"
 #include "output.h"
 #include "bitstore4.h"
 #include "signalDecoder4.h"
 #include "SimpleFIFO.h"
 
+// "Callee" can provide a callback to Caller.
+class Callee : public rssiCallbackInterface
+{
+public:
+    // The callback function that Caller will call.
+    uint8_t cbiRssiCallbackFunction()
+    {
+        return cc1101::getRSSI();
+    }
+};
+
 SimpleFIFO<int16_t,FIFO_LENGTH> FiFoA; //store FIFO_LENGTH
 SimpleFIFO<int16_t,FIFO_LENGTH> FiFoB; //store FIFO_LENGTH
 //SignalDetectorClass musterDecA;
 SignalDetectorClass musterDecB;
+Callee callee;
+
+// Connect the rssiCallback
+//musterDecA.rssiConnectCallback(&callee);
+musterDecB.rssiConnectCallback(&callee);
 
 #ifdef MAPLE_Mini
   #include <malloc.h>
@@ -223,7 +239,7 @@ void changeReceiver();
 #define cmdAnz 23
 const char cmd0[] =  {'?', '?', 'b', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'e', 'e', 'P', 'r', 'R', 'S', 't', 'T', 'V', 'W', 'x', 'X', 'X'};
 const char cmd1[] =  {'S', ' ', ' ', 'E', 'D', 'G', 'R', 'S', 'W', ' ', 'C', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'E', 'Q'};
-const bool cmdCC[] = {  0,   0,   0,   0,   0,   0,  1,   0,   1,   1,   0,   1,   0,   0,   0,   0,   0,   0,   0,   0,   1,   0,  0 };
+const bool cmdCC[] = {  0,   0,   0,   0,   0,   0,  1,   0,    1,   1,   0,   1,   0,   0,   0,   0,   0,   0,   0,   0,   1,   0,  0 };
 void (*cmdFP[])(void) = {
 		cmd_help_S, // ?S
 		cmd_help,	// ?
@@ -295,7 +311,7 @@ uint16_t getBankOffset(uint8_t tmpBank);
 uint8_t radioDetekt(bool confmode, uint8_t Dstat);
 void printHex2(const uint8_t hex);
 void setHasCC1101(uint8_t val);
-uint8_t rssiCallback() { return 0; };	// Dummy return if no rssi value can be retrieved from receiver
+//uint8_t rssiCallback() { return 0; };	// Dummy return if no rssi value can be retrieved from receiver
 
 
 void setup() {
@@ -428,7 +444,7 @@ void setup() {
 	
 //	if (radio_bank[remRadionr] < 10)
 //	{
-		musterDecB.setRSSICallback(&cc1101::getRSSI);                    // Provide the RSSI Callback
+//		musterDecB.setRSSICallback(&cc1101::getRSSI);                    // Provide the RSSI Callback
 //	} 
 //	else
 //		musterDec.setRSSICallback(&rssiCallback);	// Provide the RSSI Callback		

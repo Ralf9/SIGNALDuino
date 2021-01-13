@@ -194,8 +194,9 @@ inline void SignalDetectorClass::doDetect()
 		}
 		else if (messageLen == minMessageLen) {
 			state = detecting;  // Set state to detecting, because we have more than minMessageLen data gathered, so this is no noise
-			if (hasCC1101 && _rssiCallback != NULL) 
-				rssiValue = _rssiCallback();
+			if (hasCC1101) // && _rssiCallback != NULL) 
+				rssiValue = m_cb -> cbiRssiCallbackFunction();
+				//rssiValue = _rssiCallback();
 		}
 
 		fidx = findpatt(*first);

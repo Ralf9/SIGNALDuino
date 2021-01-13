@@ -77,6 +77,12 @@
 enum status { searching, clockfound, syncfound, detecting };
 
 
+class rssiCallbackInterface // fuer getRSSI
+{
+public:
+    // The prefix "cbi" is to prevent naming clashes.
+    virtual uint8_t cbiRssiCallbackFunction(void) = 0;
+};
 
 class SignalDetectorClass
 {
@@ -92,9 +98,14 @@ public:
 	void reset();
 	bool decode(const int16_t* pulse);
 	const status getState();
-	typedef fastdelegate::FastDelegate0<uint8_t> FuncRetuint8t;
-	void setRSSICallback(FuncRetuint8t callbackfunction) { _rssiCallback = callbackfunction; }
-
+	
+	// Clients can connect their callback with this
+	void rssiConnectCallback(rssiCallbackInterface *cb)
+	{
+		m_cb = cb;
+	}
+	//typedef fastdelegate::FastDelegate0<uint8_t> FuncRetuint8t;
+	//void setRSSICallback(FuncRetuint8t callbackfunction) { _rssiCallback = callbackfunction; }
 
 	//private:
 	int8_t clock;                           // index to clock in pattern
@@ -157,7 +168,7 @@ public:
 	uint8_t msEqCnt;
 	bool MsEqSkip;
 	
-	FuncRetuint8t _rssiCallback=NULL;			// Holds the pointer to a callback Function
+	//FuncRetuint8t _rssiCallback=NULL;			// Holds the pointer to a callback Function
 
 	void addData(const uint8_t value);
 	void addPattern();
@@ -182,6 +193,10 @@ public:
 #ifdef DEBUG_BackupReg
 	void setBackupRegSD(uint32_t n);
 #endif
+	
+private:
+    // The callback provided by the client via connectCallback().
+    rssiCallbackInterface *m_cb;
 };
 
 class ManchesterpatternDecoder
