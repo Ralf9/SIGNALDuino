@@ -109,11 +109,7 @@ SimpleFIFO<int16_t,FIFO_LENGTH> FiFoA; //store FIFO_LENGTH
 SimpleFIFO<int16_t,FIFO_LENGTH> FiFoB; //store FIFO_LENGTH
 //SignalDetectorClass musterDecA;
 SignalDetectorClass musterDecB;
-Callee callee;
-
-// Connect the rssiCallback
-//musterDecA.rssiConnectCallback(&callee);
-musterDecB.rssiConnectCallback(&callee);
+Callee rssiCallee;
 
 #ifdef MAPLE_Mini
   #include <malloc.h>
@@ -442,12 +438,16 @@ void setup() {
 	radio_bank[3] = defStatRadio;
   }
 	
+// Connect the rssiCallback
+//musterDecA.rssiConnectCallback(&rssiCallee);
+musterDecB.rssiConnectCallback(&rssiCallee);
+	
 //	if (radio_bank[remRadionr] < 10)
 //	{
 //		musterDecB.setRSSICallback(&cc1101::getRSSI);                    // Provide the RSSI Callback
 //	} 
 //	else
-//		musterDec.setRSSICallback(&rssiCallback);	// Provide the RSSI Callback		
+//		musterDec.setRSSICallback(&rssiCallback);	// Provide the RSSI Callback
 #endif 
 
 	if (musterDecB.MdebEnabled) {
