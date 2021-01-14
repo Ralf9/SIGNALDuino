@@ -39,7 +39,7 @@
 #include "compile_config.h"
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.1.2-dev210113"
+#define PROGVERS               "4.1.2-dev210114"
 #define VERSION_1               0x41
 #define VERSION_2               0x0d
 
@@ -107,7 +107,7 @@ public:
 
 SimpleFIFO<int16_t,FIFO_LENGTH> FiFoA; //store FIFO_LENGTH
 SimpleFIFO<int16_t,FIFO_LENGTH> FiFoB; //store FIFO_LENGTH
-//SignalDetectorClass musterDecA;
+SignalDetectorClass musterDecA;
 SignalDetectorClass musterDecB;
 Callee rssiCallee;
 
@@ -439,7 +439,7 @@ void setup() {
   }
 	
 // Connect the rssiCallback
-//musterDecA.rssiConnectCallback(&rssiCallee);
+musterDecA.rssiConnectCallback(&rssiCallee);
 musterDecB.rssiConnectCallback(&rssiCallee);
 	
 //	if (radio_bank[remRadionr] < 10)
@@ -581,7 +581,7 @@ void setHasCC1101(uint8_t val) {
 	else {
 		hasCC1101 = true;
 	}
-	//musterDecA.hasCC1101 = hasCC1101;
+	musterDecA.hasCC1101 = hasCC1101;
 	musterDecB.hasCC1101 = hasCC1101;
 }
 
@@ -635,11 +635,11 @@ void loop() {
   ccmode = tools::EEread(bankoff + addr_ccmode);
   if (ccmode == 0) {
 	if (radionr == 0) {
-		//musterDecA.printMsgSuccess = false;
+		musterDecA.printMsgSuccess = false;
 		while (FiFoA.count() > 0) { // Puffer auslesen und an Dekoder uebergeben
 			aktVal=FiFoA.dequeue();
 			//MSG_PRINTLN(aktVal, DEC);
-			/*state = musterDecA.decode(&aktVal);
+			state = musterDecA.decode(&aktVal);
 			if (musterDecA.MdebEnabled && musterDecA.printMsgSuccess) {
 				fifoCount = FiFoA.count();
 				if (fifoCount > MdebFifoLimitA) {
@@ -647,10 +647,10 @@ void loop() {
 					MSG_PRINTLN(fifoCount, DEC);
 				}
 			}
-			if (musterDecB.printMsgSuccess && LEDenabled) {
+			if (musterDecA.printMsgSuccess && LEDenabled) {
 				blinkLED=true; //LED blinken, wenn Meldung dekodiert
 			}
-			musterDecA.printMsgSuccess = false;*/
+			musterDecA.printMsgSuccess = false;
 		}
 	} else if (radionr == 1) {
 		musterDecB.printMsgSuccess = false;
@@ -2072,20 +2072,32 @@ void cmd_ccFactoryReset()	// e<0-9>
 
 inline void getConfig()
 {
+  SignalDetectorClass *SDptr;
+  
+  if (radionr == 0) {
+    SDptr = &musterDecA;
+  }
+  else {
+    SDptr = &musterDecB;
+  }
+  
   if (ccmode == 0 || ccmode == 15) {
-   if (musterDecB.MSeqEnabled == 0 || musterDecB.MSenabled == 0) {
-      MSG_PRINT(F("MS="));
-      MSG_PRINT(musterDecB.MSenabled,DEC);
+   if (radionr == 0) {
+      MSG_PRINT(F("A: "));
    }
-   else if (musterDecB.MSenabled) {
+   if (SDptr->MSeqEnabled == 0 || SDptr->MSenabled == 0) {
+      MSG_PRINT(F("MS="));
+      MSG_PRINT(SDptr->MSenabled,DEC);
+   }
+   else if (SDptr->MSenabled) {
       MSG_PRINT(F("MSEQ=1"));
    }
    MSG_PRINT(F(";MU="));
-   MSG_PRINT(musterDecB.MUenabled, DEC);
+   MSG_PRINT(SDptr->MUenabled, DEC);
    MSG_PRINT(F(";MC="));
-   MSG_PRINT(musterDecB.MCenabled, DEC);
+   MSG_PRINT(SDptr->MCenabled, DEC);
    MSG_PRINT(F(";Mred="));
-   MSG_PRINT(musterDecB.MredEnabled, DEC);
+   MSG_PRINT(SDptr->MredEnabled, DEC);
   }
   else {
     MSG_PRINT(F("ccmode="));
@@ -2102,34 +2114,39 @@ inline void getConfig()
 //   }
   if (ccmode == 0 || ccmode == 15) {
    MSG_PRINT(F("_MScnt="));
-   MSG_PRINT(musterDecB.MsMoveCountmax, DEC);
-   if (musterDecB.maxMuPrint < musterDecB.maxMsgSize) {
+   MSG_PRINT(SDptr->MsMoveCountmax, DEC);
+   if (SDptr->maxMuPrint < SDptr->maxMsgSize) {
       MSG_PRINT(F(";maxMuPrint="));
-      MSG_PRINT(musterDecB.maxMuPrint, DEC);
+      MSG_PRINT(SDptr->maxMuPrint, DEC);
    }
    MSG_PRINT(F(";maxMsgSize="));
-   MSG_PRINT(musterDecB.maxMsgSize, DEC);
-   if (musterDecB.MuSplitThresh > 0) {
+   MSG_PRINT(SDptr->maxMsgSize, DEC);
+   if (SDptr->MuSplitThresh > 0) {
       MSG_PRINT(F(";MuSplitThresh="));
-      MSG_PRINT(musterDecB.MuSplitThresh, DEC);
+      MSG_PRINT(SDptr->MuSplitThresh, DEC);
    }
-   if (musterDecB.mcMinBitLen != mcMinBitLenDef) {
+   if (SDptr->mcMinBitLen != mcMinBitLenDef) {
       MSG_PRINT(F(";mcMinBitLen="));
-      MSG_PRINT(musterDecB.mcMinBitLen, DEC);
+      MSG_PRINT(SDptr->mcMinBitLen, DEC);
    }
-   if (musterDecB.cMaxNumPattern != CSetDef[5]) {
+   if (SDptr->cMaxNumPattern != CSetDef[5]) {
       MSG_PRINT(F(";maxNumPat="));
-      MSG_PRINT(musterDecB.cMaxNumPattern, DEC);
+      MSG_PRINT(SDptr->cMaxNumPattern, DEC);
    }
-   if (musterDecB.cMaxPulse != -maxPulse) {
+   if (SDptr->cMaxPulse != -maxPulse) {
       MSG_PRINT(F(";maxPulse="));
-      MSG_PRINT(musterDecB.cMaxPulse, DEC);
+      MSG_PRINT(SDptr->cMaxPulse, DEC);
    }
    MSG_PRINT(F(";Mdebug="));
-   MSG_PRINT(musterDecB.MdebEnabled, DEC);
-   if (musterDecB.MdebEnabled) {
+   MSG_PRINT(SDptr->MdebEnabled, DEC);
+   if (SDptr->MdebEnabled) {
       MSG_PRINT(F(";MdebFifoLimit="));
-      MSG_PRINT(MdebFifoLimitB, DEC);
+      if (radionr == 1) {
+         MSG_PRINT(MdebFifoLimitB, DEC);
+      }
+      else {
+         MSG_PRINT(MdebFifoLimitA, DEC);
+      }
       MSG_PRINT(F("/"));
       MSG_PRINT(FIFO_LENGTH, DEC);
    }
@@ -2143,28 +2160,46 @@ inline void getConfig()
 
 inline void configCMD()
 {
-  bool *bptr;
+  bool en;
+  SignalDetectorClass *SDptr;
+  
+  if (radionr == 0) {
+    SDptr = &musterDecA;
+  }
+  else {
+    SDptr = &musterDecB;
+  }
+  
+  if (cmdstring.charAt(1) == 'E') {   // Enable
+    en = true;
+  }
+  else if (cmdstring.charAt(1) == 'D') {  // Disable
+    en =false;
+  } else {
+	unsuppCmd = true;
+	return;
+  }
 
   if (cmdstring.charAt(2) == 'S') {  	  //MS
-	bptr=&musterDecB.MSenabled;
+    SDptr->MSenabled = en;
   }
   else if (cmdstring.charAt(2) == 'U') {  //MU
-	bptr=&musterDecB.MUenabled;
+    SDptr->MUenabled = en;
   }
   else if (cmdstring.charAt(2) == 'C') {  //MC
-	bptr=&musterDecB.MCenabled;
+    SDptr->MCenabled = en;
 // }
 // else if (cmdstring.charAt(2) == 'R') {  //Mreduce
 //   bptr=&musterDec.MredEnabled;
   }
   else if (cmdstring.charAt(2) == 'D') {  //Mdebug
-	bptr=&musterDecB.MdebEnabled;
+    SDptr->MdebEnabled = en;
   }
   else if (cmdstring.charAt(2) == 'L') {  //LED
-	bptr=&LEDenabled;
+    LEDenabled = en;
   }
   else if (cmdstring.charAt(2) == 'Q') {  //MSeq
-    bptr=&musterDecB.MSeqEnabled;
+    SDptr->MSeqEnabled = en;
   }
 //  else if (cmdstring.charAt(2) == 'T') {  // toggleBankEnabled
 //	bptr=&toggleBankEnabled;
@@ -2174,16 +2209,7 @@ inline void configCMD()
 	return;
   }
 
-  if (cmdstring.charAt(1) == 'E') {   // Enable
-	*bptr=true;
-  }
-  else if (cmdstring.charAt(1) == 'D') {  // Disable
-	*bptr=false;
-  } else {
-	unsuppCmd = true;
-	return;
-  }
-  storeFunctions(musterDecB.MSenabled, musterDecB.MUenabled, musterDecB.MCenabled, musterDecB.MredEnabled, musterDecB.MdebEnabled, LEDenabled, musterDecB.MSeqEnabled);
+  storeFunctions(SDptr->MSenabled, SDptr->MUenabled, SDptr->MCenabled, SDptr->MredEnabled, SDptr->MdebEnabled, LEDenabled, SDptr->MSeqEnabled);
 }
 
 
@@ -2236,13 +2262,18 @@ inline void configSET()
 		MdebFifoLimitB = val;
 	}
 	else if (n == 2) {			// mcmbl
+		musterDecA.mcMinBitLen = val;
 		musterDecB.mcMinBitLen = val;
 	}
 	else if (n == 3) {			// mscnt
+		musterDecA.MsMoveCountmax = val;
 		musterDecB.MsMoveCountmax = val;
 	}
-	else if (n == 4) {  		// fifolimit
+	else if (n == 4) {  		// fifolimitB
 		MdebFifoLimitB = val;
+	}
+	else if (n == 7) {  		// fifolimitA
+		MdebFifoLimitA = val;
 	}
 	else if (n == 5) {			// maxMuPrintx256
 		if (val == 0) {
@@ -2264,27 +2295,47 @@ inline void configSET()
 			musterDecB.maxMsgSize = val * 256;
 		}
 	}
-	else if (n == 7) {  		// fifolimitA
-		MdebFifoLimitA = val;
+	else if (n == 8) {			// maxMuPrintx256A
+		if (val == 0) {
+			val = 1;
+		}
+		if (val * 256 > musterDecA.maxMsgSize) {
+			val = tools::EEread(CSetAddr[9]);
+		}
+		musterDecA.maxMuPrint = val * 256;
 	}
-	
+	else if (n == 9) {			// maxMsgSizex256A
+		if (val <=1 ) {
+			musterDecA.maxMsgSize = 254;
+		}
+		else if (val * 256 > defMaxMsgSize) {
+			musterDecA.maxMsgSize = defMaxMsgSize;
+		}
+		else {
+			musterDecA.maxMsgSize = val * 256;
+		}
+	}
 	else if (n == 10) {  		// onlyRXB - keine cc1101
 		setHasCC1101(val);	// onlyRXB - keine cc1101
 	}
 	else if (n == 11) {			// maxnumpat
+		musterDecA.cMaxNumPattern = val;
 		musterDecB.cMaxNumPattern = val;
 	}
 	else if (n == 12) {			// muthreshx256
 		if (val * 256 > maxPulse) {
 			val = 125;
 		}
+		musterDecA.MuSplitThresh = val * 256;
 		musterDecB.MuSplitThresh = val * 256;
 	}
-	else if (n == CSet16+1) {			// maxpulse
+	else if (n == CSet16) {			// maxpulse
 		if (val16 != 0) {
+			musterDecA.cMaxPulse = -val16;
 			musterDecB.cMaxPulse = -val16;
 		}
 		else {
+			musterDecA.cMaxPulse = -maxPulse;
 			musterDecB.cMaxPulse = -maxPulse;
 		}
 	}
@@ -2590,21 +2641,21 @@ void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t de
 	led=led<<5;
 	mseq=mseq<<6;
 	
-	int8_t dat =  ms | mu | mc | red | deb | led | mseq;
+	uint8_t dat =  ms | mu | mc | red | deb | led | mseq;
 	tools::EEwrite(addr_featuresB,dat);
 	tools::EEstore();
 }
 
 void callGetFunctions(void)
 {
-	 getFunctions(&musterDecB.MSenabled, &musterDecB.MUenabled, &musterDecB.MCenabled, &musterDecB.MredEnabled, &musterDecB.MdebEnabled, &LEDenabled, &musterDecB.MSeqEnabled);
+	getFunctions(&musterDecA.MSenabled, &musterDecA.MUenabled, &musterDecA.MCenabled, &musterDecA.MredEnabled, &musterDecA.MdebEnabled, &LEDenabled, &musterDecA.MSeqEnabled);
+	getFunctions(&musterDecB.MSenabled, &musterDecB.MUenabled, &musterDecB.MCenabled, &musterDecB.MredEnabled, &musterDecB.MdebEnabled, &LEDenabled, &musterDecB.MSeqEnabled);
+	getCSvar();
 }
 
 void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *mseq)
 {
-    uint8_t high;
-    uint8_t val;
-    int8_t dat = tools::EEread(addr_featuresB);
+    uint8_t dat = tools::EEread(addr_featuresB);
 
     // res mseq led deb red mc mu ms  (7 .. 0)
     *ms=bool (dat &(1<<0));
@@ -2614,15 +2665,29 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     *deb=bool (dat &(1<<4));
     *led=bool (dat &(1<<5));
     *mseq=bool (dat &(1<<6));
+}
+
+void getCSvar(void)
+{
+    uint8_t high;
+    uint8_t val;
     
     MdebFifoLimitB = tools::EEread(CSetAddr[4]);
     MdebFifoLimitA = tools::EEread(CSetAddr[7]);
     musterDecB.MsMoveCountmax = tools::EEread(CSetAddr[3]);	// mscnt
+    musterDecA.MsMoveCountmax = musterDecB.MsMoveCountmax;
+
     val = tools::EEread(CSetAddr[5]);	// maxMuPrintx256
     if (val == 0) {
        val = 1;
     }
     musterDecB.maxMuPrint = val * 256;
+    val = tools::EEread(CSetAddr[8]);	// maxMuPrintx256A
+    if (val == 0) {
+       val = 1;
+    }
+    musterDecA.maxMuPrint = val * 256;
+
     val = tools::EEread(CSetAddr[6]);	// maxMsgSizex256
     if (val <=1 ) {
        musterDecB.maxMsgSize = 254;
@@ -2633,26 +2698,40 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     else {
        musterDecB.maxMsgSize = val * 256;
     }
-    
-    musterDecB.cMaxNumPattern = tools::EEread(CSetAddr[11]);	// maxnumpat
+    val = tools::EEread(CSetAddr[9]);	// maxMsgSizex256A
+    if (val <=1 ) {
+       musterDecA.maxMsgSize = 254;
+    }
+    else if (val * 256 > defMaxMsgSize) {
+       musterDecA.maxMsgSize = defMaxMsgSize;
+    }
+    else {
+       musterDecA.maxMsgSize = val * 256;
+    }
 
-    val = tools::EEread(CSetAddr[12]);
+    musterDecB.cMaxNumPattern = tools::EEread(CSetAddr[11]);	// maxnumpat
+    musterDecA.cMaxNumPattern = musterDecB.cMaxNumPattern;
+
+    val = tools::EEread(CSetAddr[12]);	// muthreshx256
     if (val * 256 > maxPulse) {
         val = 125;
     }
     musterDecB.MuSplitThresh = val * 256;
+    musterDecA.MuSplitThresh = musterDecB.MuSplitThresh;
     
-    high = tools::EEread(CSetAddr[CSet16]);
+    high = tools::EEread(CSetAddr[CSet16]);	// maxpulse
     musterDecB.cMaxPulse = tools::EEread(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
     if (musterDecB.cMaxPulse == 0) {
        musterDecB.cMaxPulse = maxPulse;
     }
     musterDecB.cMaxPulse = -musterDecB.cMaxPulse;
+    musterDecA.cMaxPulse = musterDecB.cMaxPulse;
 
     musterDecB.mcMinBitLen = tools::EEread(CSetAddr[2]);	// mcmbl
     if (musterDecB.mcMinBitLen == 0) {
         musterDecB.mcMinBitLen = mcMinBitLenDef;
     }
+    musterDecA.mcMinBitLen = musterDecB.mcMinBitLen;
 }
 
 void getSelRadioBank(void)

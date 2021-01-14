@@ -5,7 +5,16 @@
 System to receive digital signals and provide them to other systems pro demodulatiob.
 
 Compile it and have fun.
-If you are using the Arduino IDE, you have to copy all the libs into your sketch folder
+If you are using the Arduino IDE, you have to copy the following libs into your sketch folder:
+bitstore4.h
+cc1101.h
+compile_config.h
+output.h
+signalDecoder4.cpp
+signalDecoder4.h
+SIGNALDuino.ino
+SimpleFIFO.h
+tools.h
 
 ### Using SIGNALDuino in FHEM
 
