@@ -41,7 +41,7 @@
 #define PROGNAME               " SIGNALduinoAdv "
 #define PROGVERS               "4.1.2-dev210114"
 #define VERSION_1               0x41
-#define VERSION_2               0x0d
+#define VERSION_2               0x2d
 
 
 	#ifdef MAPLE_SDUINO
@@ -156,15 +156,15 @@ Callee rssiCallee;
 #define addr_ccmode          0x3E
 //#define addr_features2       0x3F
 #define addr_bankdescr       0x40    // 0x40-0x47 bis Bank 9 0x88-0x8F  # Bank 0 bis Bank 9, Kurzbeschreibungen (max 8 Zeichen)
+//addr statRadio, alt eb - ee, 14.01.21
+#define addr_statRadio       0xE0    // A=E0 B=E1 C=E2 D=E3  Bit 0-3 Bank,  1F-Init, Bit 6 = 1 - Fehler bei Erkennung, Bit 6&7 = 1 - Miso Timeout, FF-deaktiviert
+#define addr_selRadio        0xE4    // alt EF
 #define addr_rxRes           0xE9    // bei 0xA5 ist rx nach dem Reset disabled
-// #define addr              0xEA  res
-#define addr_statRadio       0xEB    // A=EB B=EC C=ED D=EE  Bit 0-3 Bank,  1F-Init, Bit 6 = 1 - Fehler bei Erkennung, Bit 6&7 = 1 - Miso Timeout, FF-deaktiviert
-#define addr_selRadio        0xEF
-//#define addr_bank            0xFD
+// CSetAddr[] res ea - fd, alt f0 - fc, 14.01.21
 //      addr_features                res mseq led deb red mc mu ms  (7 .. 0)
 #define addr_featuresA       0xFE // cc1101 Modul A
 #define addr_featuresB       0xFF // cc1101 Modul B
-// Ethernet EEProm Address
+// Ethernet EEProm Address, res c0 - df
 #define EE_MAC_ADDR    0xC0
 #define EE_IP4_ADDR    0xC8
 #define EE_IP4_GATEWAY 0xCC
@@ -262,15 +262,15 @@ void (*cmdFP[])(void) = {
 		changeReceiver	// XQ
 		};
 
-#define CSetAnz 14
-#define CSetAnzEE 15
-#define CSet16 13
+#define CSetAnz 14	// Anzahl der Konfig Variablen
+#define CSetAnzEE 20 // Anzahl der CSetAddr
+#define CSet16 13	// Indexpos der 16Bit Konfig Variablen
 #define CSccN 0
 #define CSccmode 1
 
-//const char *CSetCmd[] = {  ccN        ccmode  mcmbl mscnt fifolimit maxMu..x256 m..Sizex256 fifolimitA maxMu..x256A m..Sizex256A onlyRXB maxnumpat muthreshx256 maxpulse,L};
-const uint8_t CSetAddr[] = {addr_ccN,addr_ccmode, 0xf0, 0xf1,    0xf2,       0xf3,       0xf4,      0xf5,        0xf6,        0xf7,   0xf8,     0xf9,       0xfa, 0xfb, 0xfc};
-const uint8_t CSetDef[] =  {   0,          0,        0,    4,     150,          3,          4,       150,           3,           4,      0,        8,          0,    0,    0};
+//const char *CSetCmd[] = {  ccN        ccmode  mcmbl mscnt fifolimit maxMu..x256 m..Sizex256 fifolimitA maxMu..x256A m..Sizex256A onlyRXB maxnumpat muthreshx256 maxpulse,L, res ,res ,res ,res, res};
+const uint8_t CSetAddr[] = {addr_ccN,addr_ccmode, 0xea, 0xeb,    0xec,       0xed,       0xee,      0xef,        0xf0,        0xf1,   0xf2,     0xf3,       0xf4, 0xf5, 0xf6, 0xf7,0xf8,0xf9,0xfa,0xfb};
+const uint8_t CSetDef[] =  {   0,          0,        0,    4,     150,          3,          4,       150,           3,           4,      0,        8,          0,    0,    0,  255, 255, 255, 255,255};
 
 const char string_0[] PROGMEM = "ccN";
 const char string_1[] PROGMEM = "ccmode";
@@ -1341,7 +1341,7 @@ void HandleCommand()
 
 void cmd_help_S()	// get help configvariables
 {
-	char buffer[12];
+	char buffer[18];
 	for (uint8_t i = 0; i < CSetAnz; i++) {
 	    strcpy_P(buffer, (char*)pgm_read_ptr(&(CSetCmd[i])));
 	    MSG_PRINT(F("CS"));
@@ -2215,7 +2215,7 @@ inline void configCMD()
 
 inline void configSET()
 { 
-	char buffer[15];
+	char buffer[18];
 	int16_t i = cmdstring.indexOf("=",4);
 	uint8_t n = 0;
 	uint8_t val;
@@ -2810,7 +2810,6 @@ void initEEPROMconfig(void)
 	radio_bank[2] = defStatRadio;
 	radio_bank[3] = defStatRadio;
 	tools::EEwrite(addr_selRadio, defSelRadio);
-	//tools::EEwrite(addr_bank, 0);
 	tools::EEwrite(addr_rxRes, 0xFF);
 	tools::EEstore();
 	MSG_PRINTLN(F("Init eeprom to defaults"));
