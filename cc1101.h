@@ -473,7 +473,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 
 		SPSR = (1 << SPI2X);             		// Double Clock Rate
 		*/
-		pinAsInput(PIN_SEND);        // gdo0Pi, sicherheitshalber bis zum CC1101 init erstmal input   
+		//pinAsInput(PIN_SEND);        // gdo0Pi, sicherheitshalber bis zum CC1101 init erstmal input   
 	#ifndef MAPLE_Mini
 		digitalHigh(sckPin);
 		digitalLow(mosiPin);

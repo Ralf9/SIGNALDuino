@@ -39,12 +39,13 @@
 #include "compile_config.h"
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.1.2-dev210114"
+#define PROGVERS               "4.1.2-dev210115"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
 
 	#ifdef MAPLE_SDUINO
+		const uint8_t pinSend[] = {10, 17};
 		const uint8_t pinReceive[] = {11, 18, 16, 14};
 		#define PIN_LED              33
 		#define PIN_SEND             17   // gdo0 Pin TX out
@@ -52,6 +53,7 @@
 		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
 		#define PIN_WIZ_RST          27
 	#elif MAPLE_CUL
+		const uint8_t pinSend[] = {10, 17};
 		const uint8_t pinReceive[] = {11, 18, 16, 14};
 		#define PIN_LED              33
 		#define PIN_SEND             17   // gdo0 Pin TX out
@@ -159,6 +161,10 @@ Callee rssiCallee;
 //addr statRadio, alt eb - ee, 14.01.21
 #define addr_statRadio       0xE0    // A=E0 B=E1 C=E2 D=E3  Bit 0-3 Bank,  1F-Init, Bit 6 = 1 - Fehler bei Erkennung, Bit 6&7 = 1 - Miso Timeout, FF-deaktiviert
 #define addr_selRadio        0xE4    // alt EF
+#define addr_res_e5          0xE5 // reserve
+#define addr_res_e6          0xE6
+#define addr_res_e7          0xE7
+#define addr_res_e8          0xE8
 #define addr_rxRes           0xE9    // bei 0xA5 ist rx nach dem Reset disabled
 // CSetAddr[] res ea - fd, alt f0 - fc, 14.01.21
 //      addr_features                res mseq led deb red mc mu ms  (7 .. 0)
@@ -271,7 +277,7 @@ void (*cmdFP[])(void) = {
 //const char *CSetCmd[] = {  ccN        ccmode  mcmbl mscnt fifolimit maxMu..x256 m..Sizex256 fifolimitA maxMu..x256A m..Sizex256A onlyRXB maxnumpat muthreshx256 maxpulse,L, res ,res ,res ,res, res};
 const uint8_t CSetAddr[] = {addr_ccN,addr_ccmode, 0xea, 0xeb,    0xec,       0xed,       0xee,      0xef,        0xf0,        0xf1,   0xf2,     0xf3,       0xf4, 0xf5, 0xf6, 0xf7,0xf8,0xf9,0xfa,0xfb};
 const uint8_t CSetDef[] =  {   0,          0,        0,    4,     150,          3,          4,       150,           3,           4,      0,        8,          0,    0,    0,  255, 255, 255, 255,255};
-
+// max 17 Zeichen
 const char string_0[] PROGMEM = "ccN";
 const char string_1[] PROGMEM = "ccmode";
 const char string_2[] PROGMEM = "mcmbl";
@@ -289,7 +295,6 @@ const char string_13[] PROGMEM = "maxpulse";
 
 const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6, string_7, string_8, string_9, string_10, string_11, string_12, string_13};
 
-void handleInterrupt();
 void enableReceive();
 void disableReceive();
 void serialEvent();
@@ -400,6 +405,9 @@ void setup() {
 	pinAsInput(PIN_RECEIVE_B);
 	pinAsInput(pinReceive[2]);
 	pinAsInput(pinReceive[3]);
+	pinAsInput(pinSend[0]);    // gdo0Pin, sicherheitshalber bis zum CC1101 init erstmal input
+	pinAsInput(pinSend[1]);
+	
 	// CC1101
 #ifdef WATCHDOG
 	wdt_reset();
@@ -474,12 +482,12 @@ musterDecB.rssiConnectCallback(&rssiCallee);
 		if (statRadio < 10) {
 			bankOffset = getBankOffset(statRadio);
 			ccmode = tools::EEbankRead(addr_ccmode);
-			if (radionr != 1 || ccmode > 0 || cc1101::regCheck()) {
+			if (radionr > 1 || ccmode > 0 || cc1101::regCheck()) {
 				if (tools::EEread(addr_rxRes) != 0xA5) {	// wenn A5 dann bleibt rx=0
 					en_dis_receiver(true);
 				}
-				if (radionr == 1 && ccmode == 0) {
-					pinAsOutput(PIN_SEND);
+				if (radionr <= 1 && ccmode == 0) {
+					pinAsOutput(pinSend[radionr]);
 				}
 			}
 			else {
@@ -500,7 +508,7 @@ musterDecB.rssiConnectCallback(&rssiCallee);
 		en_dis_receiver(true);
 	}
 	if (ccmode == 0) {
-		pinAsOutput(PIN_SEND);
+		pinAsOutput(pinSend[radionr]);
 	}
   }
 	MSG_PRINTLN("");
@@ -884,6 +892,7 @@ void send_raw(const uint8_t startpos,const uint16_t endpos,const int16_t *bucket
 	unsigned long stoptime=micros();
 	bool isLow;
 	int16_t dur;
+	uint8_t pin_send = pinSend[radionr];
 
   if (ccmode == 0) {
 	for (uint16_t i=startpos;i<=endpos;i++ )
@@ -896,7 +905,7 @@ void send_raw(const uint8_t startpos,const uint16_t endpos,const int16_t *bucket
 		while (stoptime > micros()){
 			;
 		}
-		isLow ? digitalLow(PIN_SEND): digitalHigh(PIN_SEND);
+		isLow ? digitalLow(pin_send): digitalHigh(pin_send);
 		stoptime+=dur;
 	}
 	while (stoptime > micros()){
@@ -926,6 +935,7 @@ void send_mc(const uint8_t startpos,const uint8_t endpos, const int16_t clock)
 	//digitalHigh(PIN_SEND);
 	//delay(1);
 	uint8_t bit;
+	uint8_t pin_send = pinSend[radionr];
 
 	unsigned long stoptime =micros();
 	for (uint8_t i = startpos; i <= endpos; i++) {
@@ -935,9 +945,9 @@ void send_mc(const uint8_t startpos,const uint8_t endpos, const int16_t clock)
 		for (bit = 0x8; bit>0; bit >>= 1) {
 			for (byte i = 0; i <= 1; i++) {
 				if ((i == 0 ? (b & bit) : !(b & bit)))
-					digitalLow(PIN_SEND);
+					digitalLow(pin_send);
 				else
-					digitalHigh(PIN_SEND);
+					digitalHigh(pin_send);
 				
 					stoptime += clock;
 					while (stoptime > micros())
@@ -1006,10 +1016,23 @@ void send_cmd()
 	uint16_t tmpBankoff;
 	uint8_t remccmode = ccmode;
 	uint8_t tmpBank;
+	bool sendRadio = 1;
 	
-	tmpBank = radio_bank[1];	// Modul B
+	if (cmdstring.length() < 20) {
+		MSG_PRINTLN(F("send cmd is to short!"));
+		return;
+	}
+	if (cmdstring.charAt(2) == 'A') {
+#ifdef DEBUGSENDCMD
+		MSG_PRINTLN(F("send radioA"));
+#endif
+		sendRadio = 0;
+	}
+	tmpBank = radio_bank[sendRadio];
 	if (tmpBank > 9) {
-		MSG_PRINTLN(F("Radio B is not active!"));
+		MSG_PRINT(F("Radio "));
+		MSG_WRITE(sendRadio + 'A');
+		MSG_PRINTLN(F(" is not active!"));
 		return;
 	}
 	tmpBankoff = getBankOffset(tmpBank);
@@ -1020,7 +1043,7 @@ void send_cmd()
 		return;
 	}
 	uint8_t remRadionr = radionr;
-	radionr = 1;
+	radionr = sendRadio;
 
 	uint8_t repeats=1;  // Default is always one iteration so repeat is 1 if not set
 	int16_t start_pos=0;
@@ -1065,6 +1088,10 @@ void send_cmd()
 				MSG_PRINT("S");
 				MSG_PRINTLN(msg_cmd1);
 #endif
+			}
+			else {
+				startdata = -1;
+				break;
 			}
 		} else if (msg_cmd0 == 'R') {
 			if (isCombined) {
@@ -1158,7 +1185,7 @@ void send_cmd()
 						send_mc(command[c].datastart, command[c].dataend, command[c].sendclock);
 					}
 				}
-				digitalLow(PIN_SEND);
+				digitalLow(pinSend[radionr]);
 			}
 			//if (extraDelay) delay(1);
 		}
@@ -2258,9 +2285,6 @@ inline void configSET()
 		ccmode = val;
 		setCCmode();
 	}
-	if (n == 0) {  				// fifolimit
-		MdebFifoLimitB = val;
-	}
 	else if (n == 2) {			// mcmbl
 		musterDecA.mcMinBitLen = val;
 		musterDecB.mcMinBitLen = val;
@@ -2606,13 +2630,13 @@ inline void changeReceiver()
 void setCCmode() {
   if (ccmode == 0) {	// normal OOK
     enableReceive();
-    if (radionr == 1) {
-      pinAsOutput(PIN_SEND);
+    if (radionr <= 1) {
+      pinAsOutput(pinSend[radionr]);
     }
   }
   else {		// mit ccFIFO
-    if (radionr == 1) {
-       pinAsInput(PIN_SEND);
+    if (radionr <= 1) {
+       pinAsInput(pinSend[radionr]);
     }
     disableReceive();
     if (cc1101::flushrx()) {
@@ -2810,6 +2834,10 @@ void initEEPROMconfig(void)
 	radio_bank[2] = defStatRadio;
 	radio_bank[3] = defStatRadio;
 	tools::EEwrite(addr_selRadio, defSelRadio);
+	tools::EEwrite(addr_res_e5, 0xFF); // reserve
+	tools::EEwrite(addr_res_e6, 0xFF);
+	tools::EEwrite(addr_res_e7, 0xFF);
+	tools::EEwrite(addr_res_e8, 0xFF);
 	tools::EEwrite(addr_rxRes, 0xFF);
 	tools::EEstore();
 	MSG_PRINTLN(F("Init eeprom to defaults"));
