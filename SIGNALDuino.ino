@@ -39,7 +39,7 @@
 #include "compile_config.h"
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.1.2-dev210115"
+#define PROGVERS               "4.1.2-dev210120"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -70,8 +70,6 @@
 	#define FIFO_LENGTH            140 // 50
 #endif
 
-//#define WATCHDOG	1 // Der Watchdog ist in der Entwicklungs und Testphase deaktiviert. Es muss auch ohne Watchdog stabil funktionieren.
-
 #define DEBUG                  1
 
 #ifdef MAPLE_WATCHDOG
@@ -90,7 +88,6 @@
 //---------------------------------------------------------------------------------------------
 
 #include "cc1101.h"
-//#include "FastDelegate.h"
 #include "output.h"
 #include "bitstore4.h"
 #include "signalDecoder4.h"
@@ -312,7 +309,6 @@ uint16_t getBankOffset(uint8_t tmpBank);
 uint8_t radioDetekt(bool confmode, uint8_t Dstat);
 void printHex2(const uint8_t hex);
 void setHasCC1101(uint8_t val);
-//uint8_t rssiCallback() { return 0; };	// Dummy return if no rssi value can be retrieved from receiver
 
 
 void setup() {
@@ -446,16 +442,9 @@ void setup() {
 	radio_bank[3] = defStatRadio;
   }
 	
-// Connect the rssiCallback
-musterDecA.rssiConnectCallback(&rssiCallee);
-musterDecB.rssiConnectCallback(&rssiCallee);
-	
-//	if (radio_bank[remRadionr] < 10)
-//	{
-//		musterDecB.setRSSICallback(&cc1101::getRSSI);                    // Provide the RSSI Callback
-//	} 
-//	else
-//		musterDec.setRSSICallback(&rssiCallback);	// Provide the RSSI Callback
+	// Connect the rssiCallback
+	musterDecA.rssiConnectCallback(&rssiCallee);
+	musterDecB.rssiConnectCallback(&rssiCallee);
 #endif 
 
 	if (musterDecB.MdebEnabled) {
@@ -1619,12 +1608,7 @@ void print_bank_sum()	// bs - Banksummary
 	for (i = 0; i <= 9; i++) {
 		i2 = i * 2;	
 		if (Nstr[i2] != '-') {		// Bank Aktiv?
-			if (ccmodeStr[i2] == '0' && tools::EEread(addr_bankdescr + (i * 8)) == 0) {
-				strcpy(bankStr, "SlowRF");
-				j = 6;
-			}
-			else {
-				for (j = 0; j < 8; j++) {
+			  for (j = 0; j < 8; j++) {
 					ch = tools::EEread(addr_bankdescr + (i * 8) + j);
 					if ((ch >= 32 && ch <= 122) || ch == 0) {	// space to z
 						bankStr[j] = ch;
@@ -1636,8 +1620,11 @@ void print_bank_sum()	// bs - Banksummary
 						j = 0;
 						break;
 					}
-				}
-			}
+			  }
+			  if (ccmodeStr[i2] == '0' && j == 0) { // ccmode = 0 und keine gueltige Kurzbeschreibung
+				strcpy(bankStr, "SlowRF");
+				j = 6;
+			  }
 			if (j > 0) {
 				bankStr[8] = 0;
 				MSG_PRINT(F(" "));

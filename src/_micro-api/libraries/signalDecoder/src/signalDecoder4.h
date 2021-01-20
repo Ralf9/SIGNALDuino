@@ -48,7 +48,6 @@
 
 #include "output.h"
 #include "bitstore4.h"
-#include "FastDelegate.h"
 
 #define maxNumPattern 16
 #define defMaxMsgSize 1500 //2000
@@ -104,8 +103,6 @@ public:
 	{
 		m_cb = cb;
 	}
-	//typedef fastdelegate::FastDelegate0<uint8_t> FuncRetuint8t;
-	//void setRSSICallback(FuncRetuint8t callbackfunction) { _rssiCallback = callbackfunction; }
 
 	//private:
 	int8_t clock;                           // index to clock in pattern
@@ -168,8 +165,6 @@ public:
 	uint8_t msEqCnt;
 	bool MsEqSkip;
 	
-	//FuncRetuint8t _rssiCallback=NULL;			// Holds the pointer to a callback Function
-
 	void addData(const uint8_t value);
 	void addPattern();
 	inline void updPattern(const uint8_t ppos);
