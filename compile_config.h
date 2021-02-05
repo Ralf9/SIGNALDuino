@@ -4,7 +4,8 @@
 
 #define MAPLE_SDUINO 1
 //#define MAPLE_CUL 1
-//#define LAN_WIZ 1  // nicht fuer MAPLE_CUL
+//#define BLACK_BOARD 1
+//#define LAN_WIZ 1  // nur fuer MAPLE_SDUINO mit USR-ES1 W5500
 
 #define MAPLE_WATCHDOG 1
 
@@ -34,6 +35,10 @@
 	#define CMP_CC1101
 #endif
 #ifdef MAPLE_CUL
+	#define MAPLE_Mini
+	#define CMP_CC1101
+#endif
+#ifdef BLACK_BOARD
 	#define MAPLE_Mini
 	#define CMP_CC1101
 #endif

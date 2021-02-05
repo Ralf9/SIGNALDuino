@@ -39,7 +39,7 @@
 #include "compile_config.h"
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.1.2-dev210120"
+#define PROGVERS               "4.1.2-dev210205"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -49,7 +49,7 @@
 		const uint8_t pinReceive[] = {11, 18, 16, 14};
 		#define PIN_LED              33
 		#define PIN_SEND             17   // gdo0 Pin TX out
-	    #define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
+		#define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
 		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
 		#define PIN_WIZ_RST          27
 	#elif MAPLE_CUL
@@ -57,9 +57,16 @@
 		const uint8_t pinReceive[] = {11, 18, 16, 14};
 		#define PIN_LED              33
 		#define PIN_SEND             17   // gdo0 Pin TX out
-	    #define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
+		#define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
 		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
-		#define PIN_WIZ_RST          27
+	#elif BLACK_BOARD
+		const uint8_t pinSend[] = {33, 3};  // (PB1 PB0)
+		const uint8_t pinReceive[] = {11, 20, 0, 1};  // (PA0 PA15 PB11 PB10)
+		#define PIN_LED              10 // PA1
+		#define PIN_SEND             3  // PB0 gdo0 Pin TX out
+		#define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
+		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
+		#define PIN_WIZ_RST          13  // PC14
 	#endif
 
 #ifdef MAPLE_Mini

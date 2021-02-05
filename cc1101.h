@@ -35,6 +35,12 @@ namespace cc1101 {
 	#define sckPin  6   // SCLK out
 	SPIClass SPI_2(mosiPin, misoPin, sckPin);
 	const uint8_t radioCsPin[] = {7, 12, 15, 3};
+#elif BLACK_BOARD
+	#define mosiPin 4   // MOSI out
+	#define misoPin 5   // MISO in
+	#define sckPin  6   // SCLK out
+	SPIClass SPI_2(mosiPin, misoPin, sckPin);
+	const uint8_t radioCsPin[] = {19, 2, 17, 15}; // (PB3 PB2 PB5 PB7)
 #else
 	#define csPin	SS	   // CSN  out
 	#define mosiPin MOSI   // MOSI out
