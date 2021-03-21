@@ -39,7 +39,7 @@
 #include "compile_config.h"
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.1.2-dev210205"
+#define PROGVERS               "4.1.2-dev210321"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -137,10 +137,14 @@ Callee rssiCallee;
   EthernetClient client;
 #endif
 
-#ifdef DEBUG_SERIAL
+#if defined(DEBUG_SERIAL) || defined(SERIAL_USART2)
   #include <HardwareSerial.h>
-
+#endif
+#ifdef DEBUG_SERIAL
   HardwareSerial HwSerial(SerialNr);
+#endif
+#ifdef SERIAL_USART2
+  HardwareSerial Serial(USART2);
 #endif
 
 #define pulseMin  90
@@ -337,7 +341,12 @@ void setup() {
 	digitalWrite(PIN_WIZ_RST, LOW);		// RESET should be heldlowat least 500 us for W5500
 	delayMicroseconds(500);
 	digitalWrite(PIN_WIZ_RST, HIGH);
-	Ethernet.begin(mac, ip, gateway, netmask);
+	if (ip[3] != 0) {
+		Ethernet.begin(mac, ip, gateway, netmask);
+	}
+	else {  // DHCP
+		Ethernet.begin(mac);
+	}
 	server.begin();		// start listening for clients
 #else
 	if (tools::EEread(addr_rxRes) == 0xA5) {	// wenn A5 dann bleibt rx=0 und es gibt keine "Unsupported command" Meldungen
@@ -604,9 +613,9 @@ void loop() {
 	bool state;
 	uint8_t fifoCount;
 	
-/*#ifdef MAPLE_Mini
+#ifdef SERIAL_USART2
 	serialEvent();
-#endif*/
+#endif
 #ifdef LAN_WIZ
 	serialEvent();
 	ethernetLoop();
@@ -1986,10 +1995,15 @@ void cmd_readEEPROM()	// R<adr>  read EEPROM
 		print_mac(mac);
 		MSG_PRINT(F("    ip = "));
 		print_ip(ip);
-		MSG_PRINT(F("  gw = "));
-		print_ip(gateway);
-		MSG_PRINT(F("  nm = "));
-		print_ip(netmask);
+		if (ip[3] == 0) {
+			MSG_PRINT(F(" DHCP"));
+		}
+		else {
+			MSG_PRINT(F("  gw = "));
+			print_ip(gateway);
+			MSG_PRINT(F("  nm = "));
+			print_ip(netmask);
+		}
 		MSG_PRINTLN("");
 		return;
 	}
@@ -2801,7 +2815,9 @@ void initEthernetConfig(void)
 		tools::EEwrite(EE_IP4_GATEWAY+i,gateway_def[i]);
 		tools::EEwrite(EE_IP4_NETMASK+i,netmask_def[i]);
 	}
-	
+#ifdef LAN_INIT_DHCP
+	tools::EEwrite(EE_IP4_ADDR+3, 0);		// Kennzeichen fuer DHCP
+#endif
 	tools::EEwrite(EE_MAC_ADDR, mac_def[0]);
 	tools::EEwrite(EE_MAC_ADDR+1, mac_def[1]);
 	tools::EEwrite(EE_MAC_ADDR+2, mac_def[2]);

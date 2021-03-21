@@ -4,9 +4,9 @@
 
 #define MAPLE_SDUINO 1
 //#define MAPLE_CUL 1
-//#define BLACK_BOARD 1
-//#define LAN_WIZ 1  // nur fuer MAPLE_SDUINO mit USR-ES1 W5500
-
+//#define BLACK_BOARD 1  // 1 - USB, 2 - serial USART2 fuer ESP
+//#define LAN_WIZ 1        // nur fuer MAPLE_SDUINO mit USR-ES1 W5500
+#define LAN_INIT_DHCP 1  // damit wird bei der ersten Inbetriebnahme DHCP verwendet
 #define MAPLE_WATCHDOG 1
 
 //#define DEBUG_BackupReg 1
@@ -41,4 +41,7 @@
 #ifdef BLACK_BOARD
 	#define MAPLE_Mini
 	#define CMP_CC1101
+#endif
+#if BLACK_BOARD == 2
+	#define SERIAL_USART2
 #endif

@@ -51,6 +51,10 @@
 //	#include "WProgram.h"
 #endif
 
+#ifdef SERIAL_USART2
+  extern HardwareSerial Serial;
+#endif
+
 #ifdef LAN_WIZ
   #include <SPI.h>
   #include <Ethernet.h>
