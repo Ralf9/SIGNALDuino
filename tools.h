@@ -5,6 +5,8 @@
 
 #ifndef MAPLE_Mini
 #include <EEPROM.h>
+#elif ARDUINO > 190
+#include <EEPROM.h>
 #endif
 //#include "Storage.h"
 
