@@ -39,7 +39,7 @@
 #include "compile_config.h"
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.1.2-dev210520"
+#define PROGVERS               "4.1.2-dev210522"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -132,7 +132,9 @@ Callee rssiCallee;
 #ifdef LAN_WIZ
   #include <SPI.h>
   #include <Ethernet.h>
-
+  #ifdef MAPLE_CUL
+     SPIClass SPI_1(28, 29, 30);
+  #endif
   EthernetServer server = EthernetServer(23);
   EthernetClient client;
 #endif
@@ -342,8 +344,7 @@ void setup() {
 	delayMicroseconds(500);
 	digitalWrite(PIN_WIZ_RST, HIGH);
 #ifdef MAPLE_CUL
-	SPIClass SPI_1(28, 29, 30);
-	Ethernet.init(31);
+	Ethernet.init(SPI_1, 31);
 #endif
 	if (ip[3] != 0) {
 		Ethernet.begin(mac, ip, gateway, netmask);
