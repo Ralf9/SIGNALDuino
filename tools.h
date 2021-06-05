@@ -5,10 +5,9 @@
 
 #ifndef MAPLE_Mini
 #include <EEPROM.h>
-#elif ARDUINO > 190
+#elif defined(MAPLE_Mini) and ARDUINO > 190
 #include <EEPROM.h>
 #endif
-//#include "Storage.h"
 
 extern uint16_t bankOffset;
 extern String cmdstring;
@@ -102,6 +101,8 @@ namespace tools {
 		//eeprom.store();
 	#ifdef MAPLE_Mini
 		eeprom_buffer_flush();  // Copy the data from the buffer to the flash
+	#else
+		EEPROM.commit();
 	#endif
 	}
 	
@@ -109,6 +110,8 @@ namespace tools {
 	{
 	#ifdef MAPLE_Mini
 		eeprom_buffer_fill();
+	#elif defined(ESP32)
+		EEPROM.begin(900);
 	#endif
 	}
 	
@@ -127,7 +130,7 @@ namespace tools {
 		return EEread(bankOffset + reg);
 	}
 	
-	
+#ifdef MAPLE_Mini
 	/*
 	 * The width of the CRC calculation and result.
 	 * Modify the typedef for a 16 or 32-bit CRC standard.
@@ -192,5 +195,6 @@ namespace tools {
 
 		return CRCs((unsigned char*)v,9);
 	}
+#endif
 }
 #endif

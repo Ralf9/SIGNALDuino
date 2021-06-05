@@ -11,7 +11,7 @@
 #include "output.h"
 #include "tools.h"
 
-#ifdef MAPLE_Mini
+#if defined(MAPLE_Mini) || defined(ESP32)
 	#include <SPI.h>
 #endif
 
@@ -41,6 +41,17 @@ namespace cc1101 {
 	#define sckPin  6   // SCLK out
 	SPIClass SPI_2(mosiPin, misoPin, sckPin);
 	const uint8_t radioCsPin[] = {19, 2, 17, 15}; // (PB3 PB2 PB5 PB7)
+#elif defined(ESP32)
+	#define mosiPin 23   // MOSI out
+	#define misoPin 19   // MISO in
+	#define sckPin  18   // SCLK out
+	#ifdef SIGNALESP32
+		const uint8_t radioCsPin[] = {27, 5, 22, 33};
+	#elif defined(EVIL_CROW_RF)
+		const uint8_t radioCsPin[] = {5, 27, 22, 33};
+	#else  // ESP32_SDUINO_TEST
+		const uint8_t radioCsPin[] = {5, 32, 27, 33};
+	#endif
 #else
 	#define csPin	SS	   // CSN  out
 	#define mosiPin MOSI   // MOSI out
@@ -110,7 +121,7 @@ namespace cc1101 {
 	#define wait_Miso()       while(isHigh(misoPin) ) //{ static uint8_t miso_count=255;delay(1); if(miso_count==0) return 255; miso_count--; }      // wait until SPI MISO line goes low 
 	#define waitV_Miso()      while(isHigh(misoPin) ) //{ static uint8_t miso_count=255;delay(1); if(miso_count==0) return; miso_count--; }      // wait until SPI MISO line goes low 
 #endif*/
-#ifdef MAPLE_Mini
+#if defined(MAPLE_Mini) || defined(ESP32)
 	#define cc1101_Select()   digitalLow(radioCsPin[radionr])          // select (SPI) CC1101
 	#define cc1101_Deselect() digitalHigh(radioCsPin[radionr])
 #else
@@ -205,6 +216,8 @@ namespace cc1101 {
 	uint8_t sendSPI(const uint8_t val) {					     // send byte via SPI
 #ifdef MAPLE_Mini
 		return SPI_2.transfer(val);
+#elif defined(ESP32)
+		return SPI.transfer(val);
 #else
 		SPDR = val;                                      // transfer byte via SPI
 		while (!(SPSR & _BV(SPIF)));                     // wait until SPI operation is terminated
@@ -401,7 +414,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 			tools::EEbankWrite(EE_CC1101_PA + i, 0);
 		}
 	}
-	#ifdef MAPLE_Mini
+	#if defined(MAPLE_Mini) || defined(ESP32)
 	tools::EEstore();
 	#endif
 	writePatable();
@@ -423,7 +436,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 				tools::EEbankWrite(EE_CC1101_PA + i, 0);
 			}
 		}
-		#ifdef MAPLE_Mini
+		#if defined(MAPLE_Mini) || defined(ESP32)
 		tools::EEstore();
 		#endif
 		MSG_PRINTLN(F("ccFactoryReset done"));  
@@ -447,14 +460,9 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		// Setup SPI 2
 		SPI_2.begin();	//Initialize the SPI_2 port.
 		SPI_2.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
-		pinAsOutput(radioCsPin[0]);
-		digitalHigh(radioCsPin[0]);
-		pinAsOutput(radioCsPin[1]);
-		digitalHigh(radioCsPin[1]);
-		pinAsOutput(radioCsPin[2]);
-		digitalHigh(radioCsPin[2]);
-		pinAsOutput(radioCsPin[3]);
-		digitalHigh(radioCsPin[3]);
+	#elif defined(ESP32)
+		SPI.begin(sckPin, misoPin, mosiPin, radioCsPin[0]);
+		SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
 	#else
 		pinAsOutput(sckPin);
 		pinAsOutput(mosiPin);
@@ -462,6 +470,13 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		PCR = _BV(SPE) | _BV(MSTR);               // SPI speed = CLK/4
 		pinAsOutput(csPin);                    // set pins for SPI communication
 		digitalHigh(csPin);                 // SPI init
+	#endif
+		
+	#if defined(MAPLE_Mini) || defined(ESP32)
+		for (uint8_t i = 0; i < 4; i++) {
+			pinAsOutput(radioCsPin[i]);
+			digitalHigh(radioCsPin[i]);
+		}
 	#endif
 		
 		#ifdef PIN_MARK433
@@ -480,7 +495,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		SPSR = (1 << SPI2X);             		// Double Clock Rate
 		*/
 		//pinAsInput(PIN_SEND);        // gdo0Pi, sicherheitshalber bis zum CC1101 init erstmal input   
-	#ifndef MAPLE_Mini
+	#if !defined(MAPLE_Mini) && !defined(ESP32)
 		digitalHigh(sckPin);
 		digitalLow(mosiPin);
 	#endif

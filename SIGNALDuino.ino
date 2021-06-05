@@ -29,17 +29,17 @@
 *   You should have received a copy of the GNU General Public License
 *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-* Version from: https://github.com/Ralf9/SIGNALDuino/blob/dev-r412_cc1101
+* Version from: https://github.com/Ralf9/SIGNALDuino/tree/dev-r420_cc1101
 
 *------------------------------------------------------------------------------------------
 
-*-----  es ist der core 1.9.0 erforderlich ------
+*-----  fuer den MapleMini ist der core 1.9.0 erforderlich, der core 2.0.0 hat noch einen bug in der SerialUSB ------
 */
 
 #include "compile_config.h"
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.1.2-dev210522"
+#define PROGVERS               "4.2.0-dev210605"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -68,11 +68,32 @@
 		#define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
 		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
 		#define PIN_WIZ_RST          13  // PC14
+	#elif SIGNALESP32
+		const uint8_t pinSend[] = {26, 4};
+		const uint8_t pinReceive[] = {25, 13, 14, 21};
+		#define PIN_LED              2
+		#define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
+		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
+	#elif EVIL_CROW_RF
+		const uint8_t pinSend[] = {2, 26};
+		const uint8_t pinReceive[] = {4, 25, 14, 21};
+		#define PIN_LED              13
+		#define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
+		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
+	#elif ESP32_SDUINO_TEST
+		const uint8_t pinSend[] = {26, 22};
+		const uint8_t pinReceive[] = {25, 21, 14, 15};
+		#define PIN_LED              2
+		#define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
+		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
 	#endif
 
 #ifdef MAPLE_Mini
 	#define BAUDRATE               115200
 	#define FIFO_LENGTH            170
+#elif defined(ESP32)
+	#define BAUDRATE               115200
+	#define FIFO_LENGTH            200
 #else
 	#define BAUDRATE               57600
 	#define FIFO_LENGTH            140 // 50
@@ -125,10 +146,28 @@ Callee rssiCallee;
   static char *ramend = &_estack;
   static char *minSP = (char*)(ramend - &_Min_Stack_Size);
   extern "C" char *sbrk(int i);
+#elif defined(ESP32)
+  void ICACHE_RAM_ATTR sosBlink(void *pArg);
+  
+  #include "esp_timer.h"
+  #include "esp_task_wdt.h"
+  #include <WiFi.h>
+  #include <WiFiType.h>
+  
+  const char* ssid = "...";
+  const char* password = "...";
+  
+  WiFiServer Server(23);  //  port 23 = telnet
+  WiFiClient client;
+  
+  esp_timer_create_args_t cronTimer_args;
+  esp_timer_create_args_t blinksos_args;
+  esp_timer_handle_t cronTimer_handle;
+  esp_timer_handle_t blinksos_handle;
 #else
   #include <TimerOne.h>  // Timer for LED Blinking
 #endif
-  
+
 #ifdef LAN_WIZ
   #include <SPI.h>
   #include <Ethernet.h>
@@ -204,8 +243,8 @@ bool hasCC1101;
 bool LEDenabled = true;
 //bool toggleBankEnabled = false;
 bool RXenabled[] = {false, false, false, false};	// true - enable receive, Zwischenspeicher zum enablereceive merken
-bool RXenabledSlowRfA = false;
-bool RXenabledSlowRfB = false;
+volatile bool RXenabledSlowRfA = false;
+volatile bool RXenabledSlowRfB = false;
 bool unsuppCmd = false;
 bool CmdOk = false;
 uint8_t MdebFifoLimitA = 120;
@@ -217,7 +256,7 @@ uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 
 uint8_t radionr = defSelRadio;
 uint8_t radio_bank[4];
 uint8_t ccBuf[4][ccMaxBuf];
-#ifndef LAN_WIZ
+#if !defined(LAN_WIZ) && !defined(ESP32)
 bool unsuppCmdEnable;
 #endif
 // Ethernet
@@ -309,7 +348,11 @@ const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3,
 void enableReceive();
 void disableReceive();
 void serialEvent();
+#ifdef ESP32
+void IRAM_ATTR cronjob(void *pArg);
+#else
 void cronjob();
+#endif
 void HandleCommand();
 bool command_available=false;
 unsigned long getUptime();
@@ -323,6 +366,22 @@ uint16_t getBankOffset(uint8_t tmpBank);
 uint8_t radioDetekt(bool confmode, uint8_t Dstat);
 void printHex2(const uint8_t hex);
 void setHasCC1101(uint8_t val);
+
+#ifdef ESP32
+const char sos_sequence[] = "0101010001110001110001110001010100000000";
+const char boot_sequence[] = "00010100111";
+
+void ICACHE_RAM_ATTR sosBlink (void *pArg) {
+  static uint8_t pos = 0;
+  const char* pChar;
+  pChar = (const char*)pArg;      //OK in both C and C++
+
+  digitalWrite(PIN_LED, pChar[pos] == '1' ? HIGH : LOW);
+  pos++;
+  if (pos == sizeof(pChar) * sizeof(pChar[1]))
+    pos = 0;
+}
+#endif
 
 
 void setup() {
@@ -353,6 +412,39 @@ void setup() {
 		Ethernet.begin(mac);
 	}
 	server.begin();		// start listening for clients
+
+#elif defined(ESP32)
+	WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+		Server.begin();  // start telnet server
+		Server.setNoDelay(true);
+	}, WiFiEvent_t::SYSTEM_EVENT_STA_CONNECTED);
+	
+	WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+		Server.stop();  // end telnet server
+		Serial.print("WiFi lost connection. Reason: ");
+		Serial.println(info.sta_er_fail_reason);
+	}, WiFiEvent_t::SYSTEM_EVENT_STA_DISCONNECTED);
+	
+	blinksos_args.callback = sosBlink;
+	blinksos_args.dispatch_method = ESP_TIMER_TASK;
+	blinksos_args.name = "blinkSOS";
+	blinksos_args.arg = (void *)boot_sequence;
+	esp_timer_create(&blinksos_args, &blinksos_handle);
+	esp_timer_start_periodic(blinksos_handle, 300000);
+	
+	Serial.begin(115200);
+	Serial.setDebugOutput(true);
+	while (!Serial)
+		delay(90);
+	Serial.println("\n\n");
+	
+	WiFi.begin(ssid, password);
+	uint8_t i = 0;
+	while (WiFi.status() != WL_CONNECTED && i++ < 20) delay(500);
+	Serial.print("i=");
+	Serial.println(i);
+	Serial.print(WiFi.localIP());
+	Serial.println(" 23' to connect");
 #else
 	if (tools::EEread(addr_rxRes) == 0xA5) {	// wenn A5 dann bleibt rx=0 und es gibt keine "Unsupported command" Meldungen
 		unsuppCmdEnable = false;
@@ -481,6 +573,16 @@ void setup() {
 	MyTim->setOverflow(31*1000, MICROSEC_FORMAT);
 	MyTim->attachInterrupt(cronjob);
 	MyTim->resume();
+#elif defined(ESP32)
+	MSG_PRINTER.setTimeout(400);
+	
+	cronTimer_args.callback = cronjob;
+	cronTimer_args.name = "cronTimer";
+	cronTimer_args.dispatch_method = ESP_TIMER_TASK;
+	esp_timer_create(&cronTimer_args, &cronTimer_handle);
+	
+	esp_timer_start_periodic(cronTimer_handle, 31000);
+	esp_timer_stop(blinksos_handle);
 #else
 	Timer1.initialize(31*1000); //Interrupt wird jede 31 Millisekunden ausgeloest
 	Timer1.attachInterrupt(cronjob);
@@ -526,17 +628,8 @@ void setup() {
 	getSelRadioBank();
 }
 
-#ifdef MAPLE_Mini
-#if ARDUINO < 190
-void cronjob(HardwareTimer*) {
-#else
-void cronjob() {
-#endif
-	noInterrupts();
-#else
-void cronjob() {
+void IRAM_ATTR cronjob(void *pArg) {
 	cli();
-#endif
 	static uint16_t cnt0 = 0;
 	static uint8_t cnt1 = 0;
 	unsigned long durationA;
@@ -579,11 +672,7 @@ void cronjob() {
 	 digitalWrite(PIN_LED, blinkLED);
 	 blinkLED = false;
 
-#ifdef MAPLE_Mini
-	interrupts();
-#else
 	sei();
-#endif
 	
 	if (cnt0++ == 0) {
 		if (cnt1++ == 0) {
@@ -624,6 +713,10 @@ void loop() {
 #ifdef LAN_WIZ
 	serialEvent();
 	ethernetLoop();
+#endif
+#ifdef ESP32
+	serialEvent();
+	WiFiEvent();
 #endif
 	if (command_available == true) {
 		command_available=false;
@@ -697,6 +790,7 @@ void loop() {
  }
  radionr = remRadionr;
  ccmode = remccmode;
+ yield();
 }
 
 void getRxFifo(uint16_t Boffs) {
@@ -720,6 +814,9 @@ void getRxFifo(uint16_t Boffs) {
 			uint8_t RSSI = cc1101::getRSSI();
 			
 			if (ccmode == 9) {
+				if (fifoBytes > 1 && fifoBytes < 0x80) {
+					fifoBytes--;
+				}
 				MSG_PRINT(F("RX("));
 				MSG_PRINT(fifoBytes);
 				MSG_PRINT(F(") "));
@@ -790,12 +887,9 @@ void getRxFifo(uint16_t Boffs) {
 }
 
 //========================= Pulseauswertung ================================================
-void handleInterruptA() {
-#ifdef MAPLE_Mini
-  noInterrupts();
-#else
+
+void IRAM_ATTR handleInterruptA() {
   cli();
-#endif
   const unsigned long Time=micros();
   const unsigned long  duration = Time - lastTimeA;
   lastTimeA = Time;
@@ -812,19 +906,12 @@ void handleInterruptA() {
     FiFoA.enqueue(sDuration);
     lastFifoALowMax = false;
   } // else => trash
-#ifdef MAPLE_Mini
-  interrupts();
-#else
+
   sei();
-#endif
 }
 
-void handleInterruptB() {
-#ifdef MAPLE_Mini
-  noInterrupts();
-#else
+  void IRAM_ATTR handleInterruptB() {
   cli();
-#endif
   const unsigned long Time=micros();
   const unsigned long  duration = Time - lastTimeB;
   lastTimeB = Time;
@@ -841,11 +928,8 @@ void handleInterruptB() {
     FiFoB.enqueue(sDuration);
     lastFifoBLowMax = false;
   } // else => trash
-#ifdef MAPLE_Mini
-  interrupts();
-#else
+
   sei();
-#endif
 }
 
 void enableReceive() {
@@ -1354,7 +1438,7 @@ void HandleCommand()
 		unsuppCmd = true;
 	}
 	//MSG_PRINTLN("");
-#ifndef LAN_WIZ
+#if !defined(LAN_WIZ) && !defined(ESP32)
 	if (unsuppCmd && unsuppCmdEnable) {
 #else
 	if (unsuppCmd) {
@@ -1729,9 +1813,13 @@ void print_ip(uint8_t ip[])
 void cmd_Version()	// V: Version
 {
 	MSG_PRINT(F("V " PROGVERS  PROGNAME));
-#ifdef LAN_WIZ
+
+#ifdef ESP32
+	MSG_PRINT(F("ESP32 "));
+#elif LAN_WIZ
 	MSG_PRINT(F("LAN "));
 #endif
+
 	if (hasCC1101) {
 	    MSG_PRINT(F("cc1101 "));
 	}
@@ -1781,6 +1869,8 @@ void cmd_freeRam()	// R: FreeMemory
 	char * stack_ptr = (char*)__get_MSP();
 	struct mallinfo mi = mallinfo();
 	MSG_PRINTLN(((stack_ptr < minSP) ? stack_ptr : minSP) - heapend + mi.fordblks);
+#elif defined(ESP32)
+	MSG_PRINTLN(ESP.getFreeHeap());
 #else
 	extern int __heap_start, *__brkval;
 	int v;
@@ -2472,6 +2562,33 @@ inline void configRadio()
 	
 }
 
+#ifdef ESP32
+inline void WiFiEvent()
+{
+  //check if there are any new clients
+  if (Server.hasClient()) {
+    if (!client || !client.connected()) {
+      if (client) client.stop();
+      client = Server.available();
+      client.flush();
+      //DBG_PRINTLN("New client: ");
+      //DBG_PRINTLN(client.remoteIP());
+    } else {
+      WiFiClient rejectClient = Server.available();
+      rejectClient.stop();
+      //DBG_PRINTLN("Reject new Client: ");
+      //DBG_PRINTLN(rejectClient.remoteIP());
+    }
+  }
+
+  if(client && !client.connected())
+  {
+    //DBG_PRINTLN("Client disconnected: ");
+    //DBG_PRINTLN(client.remoteIP());
+    client.stop();
+  }
+}
+#endif
 
 #ifdef LAN_WIZ
 void ethernetLoop()
@@ -2600,7 +2717,7 @@ inline void changeReceiver()
 	}
 
 	else {	// alle radio
-	  #ifndef LAN_WIZ	// nur bei serial wird bei XE die "Unsupported Command" Meldung aktiviert
+	  #if !defined(LAN_WIZ) && !defined(ESP32)	// nur bei serial wird bei XE die "Unsupported Command" Meldung aktiviert
 		if (cmdstring.charAt(1) == 'E') {
 			unsuppCmdEnable = true;
 		}
@@ -2799,13 +2916,14 @@ void getEthernetConfig(void)
 {
 	uint8_t i;
 	
+#ifdef MAPLE_Mini
 	if (tools::EEread(EE_MAC_ADDR) != mac_def[0] || tools::EEread(EE_MAC_ADDR+1) != mac_def[1] || tools::EEread(EE_MAC_ADDR+2) != mac_def[2]) {
 		initEthernetConfig();
 	}
-	
 	for (i = 0; i < 6; i++) {
 		mac[i] = tools::EEread(EE_MAC_ADDR+i);
 	}
+#endif
 	for (i = 0; i < 4; i++) {
 		ip[i] = tools::EEread(EE_IP4_ADDR+i);
 		gateway[i] = tools::EEread(EE_IP4_GATEWAY+i);
@@ -2823,6 +2941,7 @@ void initEthernetConfig(void)
 #ifdef LAN_INIT_DHCP
 	tools::EEwrite(EE_IP4_ADDR+3, 0);		// Kennzeichen fuer DHCP
 #endif
+#ifdef MAPLE_Mini
 	tools::EEwrite(EE_MAC_ADDR, mac_def[0]);
 	tools::EEwrite(EE_MAC_ADDR+1, mac_def[1]);
 	tools::EEwrite(EE_MAC_ADDR+2, mac_def[2]);
@@ -2830,6 +2949,7 @@ void initEthernetConfig(void)
 	tools::EEwrite(EE_MAC_ADDR+3, (uint8_t)(fserial>>16 & 0xff));
 	tools::EEwrite(EE_MAC_ADDR+4, (uint8_t)(fserial>>8 & 0xff));
 	tools::EEwrite(EE_MAC_ADDR+5, (uint8_t)(fserial & 0xff));
+#endif
 	tools::EEstore();
 }
 

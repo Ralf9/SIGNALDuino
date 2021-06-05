@@ -14,7 +14,7 @@
 (((P) >= 8 && (P) <= 11) ? (P) - 4 : (((P) >= 18 && (P) <= 21) ? 25 - (P) : (((P) == 0) ? 2 : (((P) == 1) ? 3 : (((P) == 2) ? 1 : (((P) == 3) ? 0 : (((P) == 4) ? 4 : (((P) == 6) ? 7 : (((P) == 13) ? 7 : (((P) == 14) ? 3 : (((P) == 15) ? 1 : (((P) == 16) ? 2 : (((P) == 17) ? 0 : (((P) == 22) ? 1 : (((P) == 23) ? 0 : (((P) == 24) ? 4 : (((P) == 25) ? 7 : (((P) == 26) ? 4 : (((P) == 27) ? 5 : 6 )))))))))))))))))))
 #endif
 */
-#ifndef MAPLE_Mini
+#if !defined(MAPLE_Mini) && !defined(ESP32)
 #define portOfPin(P)\
   (((P)>=0&&(P)<8)?&PORTD:(((P)>7&&(P)<14)?&PORTB:&PORTC))
 #define ddrOfPin(P)\
@@ -24,7 +24,7 @@
 #define pinIndex(P)((uint8_t)(P>13?P-14:P&7))
 #endif
 
-#ifndef MAPLE_Mini
+#if !defined(MAPLE_Mini) && !defined(ESP32)
 #define pinMask(P)((uint8_t)(1<<pinIndex(P)))
 #define pinAsInput(P) *(ddrOfPin(P))&=~pinMask(P)
 #define pinAsInputPullUp(P) *(ddrOfPin(P))&=~pinMask(P);digitalHigh(P)
@@ -34,7 +34,7 @@
 #define isHigh(P)((*(pinOfPin(P))& pinMask(P))>0)
 #define isLow(P)((*(pinOfPin(P))& pinMask(P))==0)
 #define digitalState(P)((uint8_t)isHigh(P))
-#else
+#elif MAPLE_Mini
 	#define pinAsInput(pin) pinMode(pin, INPUT)
 	#define pinAsOutput(pin) pinMode(pin, OUTPUT)
 	#define pinAsInputPullUp(pin) pinMode(pin, INPUT_PULLUP)
@@ -42,6 +42,24 @@
 	#define digitalHigh(pin) digitalWrite(pin, HIGH)
 	#define isHigh(pin) (digitalRead(pin) == HIGH)
 	#define isLow(pin) (digitalRead(pin) == LOW)
+#else
+// ESP32
+	#define pinAsInput(pin) pinMode(pin, INPUT)
+	#define pinAsOutput(pin) pinMode(pin, OUTPUT)
+	#define pinAsInputPullUp(pin) pinMode(pin, INPUT_PULLUP)
+
+	#ifndef digitalLow
+		#define digitalLow(pin) digitalWrite(pin, LOW)
+	#endif
+	#ifndef digitalHigh
+		#define digitalHigh(pin) digitalWrite(pin, HIGH)
+	#endif
+	#ifndef isHigh
+		#define isHigh(pin) (digitalRead(pin) == HIGH)
+	#endif
+	#ifndef isLow
+		#define isLow(pin) (digitalRead(pin) == LOW)
+	#endif
 #endif
 //#define DEBUG
 
@@ -55,18 +73,22 @@
   extern HardwareSerial Serial;
 #endif
 
-#ifdef LAN_WIZ
+#ifdef ESP32
+  #include <WiFiClient.h>
+  extern WiFiClient client;
+  #define MSG_PRINTER client
+#elif LAN_WIZ
   #include <SPI.h>
   #include <Ethernet.h>
 
   extern EthernetClient client;
 
-#define MSG_PRINTER client
+  #define MSG_PRINTER client
 #else
-#define MSG_PRINTER Serial
+  #define MSG_PRINTER Serial
 #endif
 
-#ifdef LAN_WIZ
+#if defined(LAN_WIZ) || defined(ESP32)
 //#ifdef ETHERNET_DEBUG
 #define DBG_PRINTER client
 #else
