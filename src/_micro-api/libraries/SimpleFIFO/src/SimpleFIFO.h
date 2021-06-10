@@ -3,13 +3,6 @@
 #ifndef SimpleFIFO_h
 #define SimpleFIFO_h
 #include <Arduino.h>
-#ifndef SIMPLEFIFO_SIZE_TYPE
-#ifndef SIMPLEFIFO_LARGE
-#define SIMPLEFIFO_SIZE_TYPE uint8_t
-#else
-#define SIMPLEFIFO_SIZE_TYPE uint16_t
-#endif
-#endif
 /*
 ||
 || @file 		SimpleFIFO.h
@@ -40,60 +33,51 @@
 || #
 ||
 */
-template<typename T, uint16_t rawSize>
+
+#define FIFO_LENGTH            200
+
 class SimpleFIFO {
 public:
-	const SIMPLEFIFO_SIZE_TYPE size;				//speculative feature, in case it's needed
 
-	SimpleFIFO();
+	SimpleFIFO(uint8_t rawsize);
 
-	T dequeue();				//get next element
-	bool enqueue( T element );	//add an element
-	T peek() const;				//get the next element without releasing it from the FIFO
+	int16_t dequeue();				//get next element
+	void IRAM_ATTR enqueue(int16_t element );	//add an element
 	void flush();				//[1.1] reset to default state 
-
-	//how many elements are currently in the FIFO?
-	SIMPLEFIFO_SIZE_TYPE count() { return numberOfElements; }
+	
+	uint8_t count() { return numberOfElements; }
 
 private:
-#ifndef SimpleFIFO_NONVOLATILE
-	volatile SIMPLEFIFO_SIZE_TYPE numberOfElements;
-	volatile SIMPLEFIFO_SIZE_TYPE nextIn;
-	volatile SIMPLEFIFO_SIZE_TYPE nextOut;
-	volatile T raw[rawSize];
-#else
-	SIMPLEFIFO_SIZE_TYPE numberOfElements;
-	SIMPLEFIFO_SIZE_TYPE nextIn;
-	SIMPLEFIFO_SIZE_TYPE nextOut;
-	T raw[rawSize];
-#endif
+  uint8_t size;
+  volatile uint8_t numberOfElements = 0;
+  volatile uint8_t nextIn = 0;
+  volatile uint8_t nextOut = 0;
+  volatile int16_t rawFifo[FIFO_LENGTH];
 };
 
-template<typename T, uint16_t rawSize>
-SimpleFIFO<T,rawSize>::SimpleFIFO() : size(rawSize) {
+SimpleFIFO::SimpleFIFO(uint8_t rawsize)
+{
+	size = rawsize; // configured size
 	flush();
 }
-template<typename T, uint16_t rawSize>
-bool IRAM_ATTR SimpleFIFO<T,rawSize>::enqueue( T element ) {
-	if ( numberOfElements >= size ) { return false; }
+
+void IRAM_ATTR SimpleFIFO::enqueue(int16_t element) {
+	if ( numberOfElements >=  size) { return; }
 	numberOfElements++;
 	nextIn %= size;
-	raw[nextIn] = element;
-	nextIn++; //advance to next index
-	return true;
+	rawFifo[nextIn] = element;
+	nextIn++;
+	return;
 }
-template<typename T, uint16_t rawSize>
-T SimpleFIFO<T,rawSize>::dequeue() {
+
+int16_t SimpleFIFO::dequeue() {
 	numberOfElements--;
 	nextOut %= size;
-	return raw[ nextOut++];
+	return rawFifo[nextOut++];
 }
-template<typename T, uint16_t rawSize>
-T SimpleFIFO<T,rawSize>::peek() const {
-	return raw[ nextOut % size];
-}
-template<typename T, uint16_t rawSize>
-void SimpleFIFO<T,rawSize>::flush() {
+
+void SimpleFIFO::flush() {
 	nextIn = nextOut = numberOfElements = 0;
 }
+
 #endif

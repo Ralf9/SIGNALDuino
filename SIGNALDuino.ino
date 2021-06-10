@@ -39,7 +39,7 @@
 #include "compile_config.h"
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.0-dev210605"
+#define PROGVERS               "4.2.0-dev210610"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -93,7 +93,7 @@
 	#define FIFO_LENGTH            170
 #elif defined(ESP32)
 	#define BAUDRATE               115200
-	#define FIFO_LENGTH            200
+	#define FIFO_LENGTH            200      // !! bitte auch das FIFO_LENGTH in der SimpleFIFO_h beachten
 #else
 	#define BAUDRATE               57600
 	#define FIFO_LENGTH            140 // 50
@@ -125,7 +125,7 @@
 // "Callee" can provide a callback to Caller.
 class Callee : public rssiCallbackInterface
 {
-public:
+    public:
     // The callback function that Caller will call.
     uint8_t cbiRssiCallbackFunction()
     {
@@ -133,12 +133,17 @@ public:
     }
 };
 
-SimpleFIFO<int16_t,FIFO_LENGTH> FiFoA; //store FIFO_LENGTH
-SimpleFIFO<int16_t,FIFO_LENGTH> FiFoB; //store FIFO_LENGTH
+//SimpleFIFO<int16_t,FIFO_LENGTH> FiFoA; //store FIFO_LENGTH
+//SimpleFIFO<int16_t,FIFO_LENGTH> FiFoB; //store FIFO_LENGTH
+SimpleFIFO FiFoA(FIFO_LENGTH);
+SimpleFIFO FiFoB(FIFO_LENGTH);
 SignalDetectorClass musterDecA;
 SignalDetectorClass musterDecB;
+
 Callee rssiCallee;
 
+
+//---- hardware specifics settings -----------------------------------------
 #ifdef MAPLE_Mini
   #include <malloc.h>
   extern char _estack;
@@ -149,16 +154,22 @@ Callee rssiCallee;
 #elif defined(ESP32)
   void ICACHE_RAM_ATTR sosBlink(void *pArg);
   
-  #include "esp_timer.h"
-  #include "esp_task_wdt.h"
   #include <WiFi.h>
   #include <WiFiType.h>
+  #include <WiFiManager.h>
+  #define WIFI_MANAGER_OVERRIDE_STRINGS
   
-  const char* ssid = "...";
-  const char* password = "...";
+  //needed for library
+  #include <DNSServer.h>
+  
+  //const char* ssid = "...";
+  //const char* password = "...";
   
   WiFiServer Server(23);  //  port 23 = telnet
   WiFiClient client;
+  
+  #include "esp_timer.h"
+  #include "esp_task_wdt.h"
   
   esp_timer_create_args_t cronTimer_args;
   esp_timer_create_args_t blinksos_args;
@@ -189,9 +200,7 @@ Callee rssiCallee;
 #endif
 
 #define pulseMin  90
-
 #define maxCmdString 600
-
 #define maxSendPattern 10
 #define mcMinBitLenDef   17
 #define ccMaxBuf 64
@@ -201,7 +210,8 @@ Callee rssiCallee;
 #define radioOokAsk 1
 #define defSelRadio 1	// B
 #define defStatRadio 0xFF
-// EEProm Address
+
+//--- EEProm Address
 #define EE_MAGIC_OFFSET      0
 //#define addr_togglesec       0x3C
 #define addr_ccN             0x3D
@@ -256,15 +266,18 @@ uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 
 uint8_t radionr = defSelRadio;
 uint8_t radio_bank[4];
 uint8_t ccBuf[4][ccMaxBuf];
+
 #if !defined(LAN_WIZ) && !defined(ESP32)
-bool unsuppCmdEnable;
+  bool unsuppCmdEnable;
 #endif
-// Ethernet
+
+//--- Ethernet
 uint8_t mac[6];
 uint8_t ip[4];
 uint8_t gateway[4];
 uint8_t netmask[4];
 
+//--- FORWARDS @ main -----------------------------------------
 void cmd_help_S();
 void cmd_help();
 void cmd_bank();
@@ -286,6 +299,38 @@ void cmd_Version();
 void cmd_writeEEPROM();
 void cmd_writePatable();
 void changeReceiver();
+void enableReceive();
+void disableReceive();
+void callGetFunctions();
+void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *mseq);
+void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t deb, int8_t led, int8_t mseq);
+
+void getCSvar();
+void getSelRadioBank();
+void getRxFifo(uint16_t Boffs);
+void print_bank_sum();
+void print_Bank();
+void en_dis_receiver(bool en_receiver);
+void initEEPROM();
+void initEEPROMconfig();
+void serialEvent();
+void HandleCommand();
+unsigned long getUptime();
+void setCCmode();
+void print_radio_sum();
+uint16_t getBankOffset(uint8_t tmpBank);
+uint8_t radioDetekt(bool confmode, uint8_t Dstat);
+void printHex2(const uint8_t hex);
+void setHasCC1101(uint8_t val);
+
+//--- platform specific forwards @ main ------------------------------------------
+#if defined(ESP32)
+	inline void WiFiEvent();
+	void IRAM_ATTR cronjob(void *pArg);
+#else
+	void cronjob();
+#endif
+//--------------------------------------------------------------------------------
 
 //typedef void (* GenericFP)(int); //function pointer prototype to a function which takes an 'int' an returns 'void'
 #define cmdAnz 23
@@ -345,27 +390,7 @@ const char string_13[] PROGMEM = "maxpulse";
 
 const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6, string_7, string_8, string_9, string_10, string_11, string_12, string_13};
 
-void enableReceive();
-void disableReceive();
-void serialEvent();
-#ifdef ESP32
-void IRAM_ATTR cronjob(void *pArg);
-#else
-void cronjob();
-#endif
-void HandleCommand();
 bool command_available=false;
-unsigned long getUptime();
-//void storeFunctions(const int8_t ms=1, int8_t mu=1, int8_t mc=1, int8_t red=1, int8_t deb=0, int8_t led=1, int8_t overfl=0);
-//void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl);
-void initEEPROM(void);
-void setCCmode();
-void print_Bank();
-void print_radio_sum();
-uint16_t getBankOffset(uint8_t tmpBank);
-uint8_t radioDetekt(bool confmode, uint8_t Dstat);
-void printHex2(const uint8_t hex);
-void setHasCC1101(uint8_t val);
 
 #ifdef ESP32
 const char sos_sequence[] = "0101010001110001110001110001010100000000";
@@ -381,8 +406,42 @@ void ICACHE_RAM_ATTR sosBlink (void *pArg) {
   if (pos == sizeof(pChar) * sizeof(pChar[1]))
     pos = 0;
 }
-#endif
 
+//--------------------------------------------------------------------------------
+//--- gets called, when WiFiManager enters configuration mode
+void configModeCallback (WiFiManager *myWiFiManager) 
+{
+  Serial.println("Entered config mode");
+  Serial.println(WiFi.softAPIP());
+  //if you used auto generated SSID, print it
+  Serial.println(myWiFiManager->getConfigPortalSSID());
+  //entered config mode, make led toggle faster
+  //ticker.attach(0.2, tick);
+}
+
+bool shouldSaveConfig = false;
+
+void saveConfigCallback() {
+	Serial.println("Should save config");
+	shouldSaveConfig = true;
+}
+
+bool saveIp(IPAddress IP, uint8_t EE_pos) {
+	bool flag = false;
+	uint8_t ii;
+	for (uint8_t i = 0; i < 4; i++) {
+		ii = IP[i];
+		if (ii != tools::EEread(EE_pos+i)) {
+			//Serial.print("ne ");
+			tools::EEwrite(EE_pos+i,ii);
+			flag = true;
+		}
+		//Serial.println(ii);
+	}
+	return flag;
+}
+
+#endif
 
 void setup() {
 #ifdef MAPLE_Mini
@@ -395,16 +454,16 @@ void setup() {
 	sichBackupReg = (uint8_t)getBackupRegister(RTC_BKP_INDEX);
 #endif
 	tools::EEbufferFill();
-	getEthernetConfig();
+	getEthernetConfig(true);
 	pinAsOutput(PIN_LED);
 #ifdef LAN_WIZ
 	digitalWrite(PIN_LED, LOW);
 	digitalWrite(PIN_WIZ_RST, LOW);		// RESET should be heldlowat least 500 us for W5500
 	delayMicroseconds(500);
 	digitalWrite(PIN_WIZ_RST, HIGH);
-#ifdef MAPLE_CUL
+  #ifdef MAPLE_CUL
 	Ethernet.init(SPI_1, 31);
-#endif
+  #endif
 	if (ip[3] != 0) {
 		Ethernet.begin(mac, ip, gateway, netmask);
 	}
@@ -414,7 +473,14 @@ void setup() {
 	server.begin();		// start listening for clients
 
 #elif defined(ESP32)
-	WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+  /*disconnectedEventHandler = WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected & event)
+  {
+    Server.stop();
+    Serial.print("WiFi lost connection. Reason: ");
+    Serial.println(event.reason);
+  });*/
+	
+	/*WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
 		Server.begin();  // start telnet server
 		Server.setNoDelay(true);
 	}, WiFiEvent_t::SYSTEM_EVENT_STA_CONNECTED);
@@ -424,7 +490,7 @@ void setup() {
 		Serial.print("WiFi lost connection. Reason: ");
 		Serial.println(info.sta_er_fail_reason);
 	}, WiFiEvent_t::SYSTEM_EVENT_STA_DISCONNECTED);
-	
+	*/
 	blinksos_args.callback = sosBlink;
 	blinksos_args.dispatch_method = ESP_TIMER_TASK;
 	blinksos_args.name = "blinkSOS";
@@ -432,20 +498,155 @@ void setup() {
 	esp_timer_create(&blinksos_args, &blinksos_handle);
 	esp_timer_start_periodic(blinksos_handle, 300000);
 	
+	WiFi.mode(WIFI_STA);
+	
 	Serial.begin(115200);
 	Serial.setDebugOutput(true);
 	while (!Serial)
 		delay(90);
-	Serial.println("\n\n");
+
+	Serial.println(F("\nstarted"));
 	
-	WiFi.begin(ssid, password);
-	uint8_t i = 0;
-	while (WiFi.status() != WL_CONNECTED && i++ < 20) delay(500);
-	Serial.print("i=");
-	Serial.println(i);
-	Serial.print(WiFi.localIP());
-	Serial.println(" 23' to connect");
-#else
+	WiFiManager wifiManager;
+	
+	//set config save notify callback
+	wifiManager.setSaveConfigCallback(saveConfigCallback);
+	
+	int16_t serTimeout = 250;
+	bool serCmdAvailable = false;
+	char IBuf[6];
+	IBuf[0] = 0;
+	uint8_t Iidx = 0;
+	Serial.print(F("\nserial menue? (enter 'cmd') ")); Serial.print(F("Timeout:")); Serial.println(serTimeout * 10);
+	while (serTimeout > 0) {
+		if ( Serial.available() && Iidx < 5)
+		{
+			IBuf[Iidx] = (char)Serial.read();
+			switch (IBuf[Iidx])
+			{
+				case '\n':
+				case '\r':
+				case '\0':
+					IBuf[Iidx] = 0;
+					if (strcmp(IBuf,"cmd") == 0) {
+						serCmdAvailable = true;
+					}
+					serTimeout = 1;
+			}
+			Iidx++;
+		}
+		delay(10);
+		serTimeout--;
+	}
+	
+	if (serCmdAvailable == true){
+		Serial.println(F("serial command menue"));
+		Serial.println(F("i - printDiag"));
+		Serial.print(F("c - change DHCP <> StaticIP, act: "));
+		if (ip[3] == 0) {
+			Serial.println(F("DHCP"));
+		}
+		else {
+			Serial.println(F("static"));
+		}
+		Serial.println(F("R - resetWifiSettings"));
+		Serial.println(F("q - quit"));
+		
+		Iidx = 0;
+		bool serExitFlag = false;
+		while (serExitFlag == false) {
+			if ( Serial.available() && Iidx < 5) {
+				IBuf[Iidx] = (char)Serial.read();
+				switch (IBuf[Iidx])
+				{
+					case '\n':
+					case '\r':
+					case '\0':
+						//Serial.print(Iidx);
+						//Serial.print(" buf=");
+						//Serial.println(IBuf);
+						if (IBuf[0] == 'q') {
+							serExitFlag = true;
+						}
+						else if (IBuf[0] == 'i') {
+							WiFi.printDiag(Serial);
+							Serial.println("");
+						}
+						else if (IBuf[0] == 'c') {
+							if (ip[3] == 0) {      // DHCP
+								ip[3] = ip_def[3];
+								Serial.println(F("new: static"));
+							}
+							else {
+								ip[3] = 0;
+								Serial.println(F("new: DHCP"));
+							}
+						}
+						else if (IBuf[0] == 'R') {
+							Serial.println(F("Return to AP-mode, because reset command received."));
+							//--- reset saved settings
+							wifiManager.resetSettings();
+							serExitFlag = true;
+						}
+						Iidx = 0;
+						break;
+					default:
+						Iidx++;
+				}
+			}
+		}
+	}
+	else {
+		Serial.print(F("serial command, timeout "));
+		Serial.print(Iidx);
+		Serial.print(" buf=");
+		Serial.println(IBuf);
+	}
+	
+	if (ip[3] != 0) { // kein DHCP
+		wifiManager.setSTAStaticIPConfig(ip,gateway,netmask);
+		//wifiManager.setShowStaticFields(true);
+	}
+	
+		//--- set callback that gets called, when connecting to previous WiFi fails, and enters AP-mode
+		wifiManager.setAPCallback(configModeCallback);
+
+		if ( !wifiManager.autoConnect("ESP32DuinoConfig",NULL) ) 
+		{
+			Serial.println(F("failed to connect and hit timeout"));
+			//--- reset and try again, or maybe put it to deep sleep
+			ESP.restart();
+			delay(3000);
+		}
+    
+    	//--- if you get here you have connected to the WiFi
+    	Serial.println(F("WifiManager had connected ...yeey :)"));
+	
+	//WiFi.config(IPAddress(192,168,0,47), IPAddress(192,168,0,191), IPAddress(255,255,255,0));
+	//WiFi.begin(ssid, password);
+	//uint8_t i = 0;
+	//while (WiFi.status() != WL_CONNECTED && i++ < 20) delay(500);
+	//Serial.print("i="); Serial.println(i);
+	Serial.println(F("\nlocal ip"));
+	Serial.println(WiFi.localIP());
+	Serial.println(WiFi.gatewayIP());
+	Serial.println(WiFi.subnetMask());
+	
+	if (shouldSaveConfig) {
+		Serial.println(F("\nsave ip"));
+		bool saveFlag;
+		saveFlag = saveIp(WiFi.localIP(), EE_IP4_ADDR) + saveIp(WiFi.gatewayIP(), EE_IP4_GATEWAY) + saveIp(WiFi.subnetMask(), EE_IP4_NETMASK);
+		if (saveFlag) {
+			tools::EEstore();
+			Serial.println(F("IPaddress changed -> save"));
+			getEthernetConfig(false);
+		}
+		
+	}
+	
+	Server.begin();    // start listening for clients
+	
+#else  // MapleMini USB
 	if (tools::EEread(addr_rxRes) == 0xA5) {	// wenn A5 dann bleibt rx=0 und es gibt keine "Unsupported command" Meldungen
 		unsuppCmdEnable = false;
 	}
@@ -467,10 +668,11 @@ void setup() {
 		}
 	}*/
 	digitalWrite(PIN_LED, LOW);
-#ifdef DEBUG_SERIAL
+  #ifdef DEBUG_SERIAL
 	HwSerial.println(F("serial init ok"));
+  #endif
 #endif
-#endif
+
 #ifdef DEBUG_BackupReg
 	MSG_PRINT(F("BackupReg = "));
 	MSG_PRINTLN(sichBackupReg);
@@ -626,8 +828,9 @@ void setup() {
   }
 	MSG_PRINTLN("");
 	getSelRadioBank();
-}
+} //---  of setup
 
+//--------------------------------------------------------------------------------
 void IRAM_ATTR cronjob(void *pArg) {
 	cli();
 	static uint16_t cnt0 = 0;
@@ -681,7 +884,7 @@ void IRAM_ATTR cronjob(void *pArg) {
 	}
 }
 
-
+//--------------------------------------------------------------------------------
 void setHasCC1101(uint8_t val) {
 	if (val == 1) {
 		hasCC1101 = false;	// onlyRXB - keine cc1101
@@ -701,7 +904,7 @@ void setBackupReg(uint32_t n) {
 }
 #endif
 
-
+//--------------------------------------------------------------------------------
 void loop() {
 	static int16_t aktVal=0;
 	bool state;
@@ -793,6 +996,7 @@ void loop() {
  yield();
 }
 
+//--------------------------------------------------------------------------------
 void getRxFifo(uint16_t Boffs) {
 	uint8_t fifoBytes;
 	bool dup;		// true bei identischen Wiederholungen bei readRXFIFO
@@ -932,6 +1136,7 @@ void IRAM_ATTR handleInterruptA() {
   sei();
 }
 
+//--------------------------------------------------------------------------------
 void enableReceive() {
   if (RXenabled[radionr] == true) {
    if (ccmode == 0 && radionr == 0) {
@@ -952,6 +1157,7 @@ void enableReceive() {
   }
 }
 
+//--------------------------------------------------------------------------------
 void disableReceive() {
   if (ccmode == 0 && radionr == 0) {
     detachInterrupt(digitalPinToInterrupt(PIN_RECEIVE_A));
@@ -1020,9 +1226,9 @@ void send_raw(const uint8_t startpos,const uint16_t endpos,const int16_t *bucket
   }
 	//MSG_PRINTLN("");
 }
+
+//--------------------------------------------------------------------------------
 //SM;R=2;C=400;D=AFAFAF;
-
-
 void send_mc(const uint8_t startpos,const uint8_t endpos, const int16_t clock)
 {
 	int8_t b;
@@ -1055,7 +1261,7 @@ void send_mc(const uint8_t startpos,const uint8_t endpos, const int16_t clock)
 	// MSG_PRINTLN("");
 }
 
-
+//--------------------------------------------------------------------------------
 bool split_cmdpart(int16_t *startpos, int16_t *startdata)
 {
 	int16_t endpos=0;
@@ -1087,6 +1293,7 @@ bool split_cmdpart(int16_t *startpos, int16_t *startdata)
 	return true;
 }
 
+//--------------------------------------------------------------------------------
 // SC;R=4;SM;C=400;D=AFFFFFFFFE;SR;P0=-2500;P1=400;D=010;SM;D=AB6180;SR;D=101;
 // SC;R=4;SM;C=400;D=FFFFFFFF;SR;P0=-400;P1=400;D=101;SM;D=AB6180;SR;D=101;
 // SR;R=3;P0=1230;P1=-3120;P2=-400;P3=-900;D=030301010101010202020202020101010102020202010101010202010120202;
@@ -1318,7 +1525,7 @@ void send_cmd()
 	radionr = remRadionr;
 }
 
-
+//--------------------------------------------------------------------------------
 void send_ccFIFO()
 {
 	uint8_t repeats=1;  // Default is always one iteration so repeat is 1 if not set
@@ -1459,8 +1666,7 @@ void HandleCommand()
 #endif
 }
 
-
-
+//--------------------------------------------------------------------------------
 void cmd_help_S()	// get help configvariables
 {
 	char buffer[18];
@@ -1488,6 +1694,7 @@ void cmd_help()
 	MSG_PRINTLN("");
 }
 
+//--------------------------------------------------------------------------------
 void cmd_bank()
 {
 	uint8_t posDigit = 1;
@@ -1593,6 +1800,7 @@ void cmd_bank()
 	}
 }
 
+//--------------------------------------------------------------------------------
 uint16_t getBankOffset(uint8_t tmpBank)
 {
 	uint16_t bankOffs;
@@ -1605,6 +1813,8 @@ uint16_t getBankOffset(uint8_t tmpBank)
 	return bankOffs;
 }
 
+//-- todo evtl in eigene lib
+//--------------------------------------------------------------------------------
 void print_ccconf(uint16_t bankOffs)
 {
 	char hexString[6];
@@ -1624,6 +1834,7 @@ void print_ccconf(uint16_t bankOffs)
 	MSG_PRINT(hexString);
 }
 
+//--------------------------------------------------------------------------------
 void print_Bank()
 {
 	uint8_t tmp_ccN = tools::EEbankRead(addr_ccN);
@@ -1645,6 +1856,7 @@ void print_Bank()
 	MSG_PRINTLN("");
 }
 
+//--------------------------------------------------------------------------------
 void print_bank_sum()	// bs - Banksummary
 {
 	char bankStr[23];
@@ -1746,6 +1958,7 @@ void print_bank_sum()	// bs - Banksummary
 	//	Bank__ 0 1 2 3 4 5 6 7 8 9  Radio_ B A - C - - - - - -  N_____ 0 0 2 3 4 - - - - -  ccmode 0 3 3 3 2 - - - - -
 }
 
+//--------------------------------------------------------------------------------
 void print_radio_sum()	// br - Bankinfo fuer alle cc1101 denen eine Bank zugeordnet ist, ausgeben
 {
 	uint16_t rbankoff;
@@ -1790,6 +2003,8 @@ void print_radio_sum()	// br - Bankinfo fuer alle cc1101 denen eine Bank zugeord
 	MSG_PRINTLN("");
 }
 
+//-- todo evtl in eigene lib
+//--------------------------------------------------------------------------------
 void print_mac(uint8_t mac[])
 {
 	for (uint8_t i = 0; i < 6; i++) {
@@ -1800,6 +2015,8 @@ void print_mac(uint8_t mac[])
 	}
 }
 
+//-- todo evtl in eigene lib
+//--------------------------------------------------------------------------------
 void print_ip(uint8_t ip[])
 {
 	for (uint8_t i = 0; i < 4; i++) {
@@ -1810,6 +2027,7 @@ void print_ip(uint8_t ip[])
 	}
 }
 
+//--------------------------------------------------------------------------------
 void cmd_Version()	// V: Version
 {
 	MSG_PRINT(F("V " PROGVERS  PROGNAME));
@@ -1862,6 +2080,7 @@ void cmd_Version()	// V: Version
 	MSG_PRINTLN(F("- compiled at " __DATE__ " " __TIME__));
 }
 
+//--------------------------------------------------------------------------------
 void cmd_freeRam()	// R: FreeMemory
 {
 #ifdef MAPLE_Mini
@@ -1878,6 +2097,7 @@ void cmd_freeRam()	// R: FreeMemory
 #endif
 }
 
+//--------------------------------------------------------------------------------
 void cmd_send()
 {
 	/*if (musterDecB.getState() != searching )
@@ -1898,16 +2118,20 @@ void cmd_send()
 	//}
 }
 
+//-- todo evtl in eigene lib
+//--------------------------------------------------------------------------------
 void cmd_uptime()	// t: Uptime
 {
 	MSG_PRINTLN(getUptime());
 }
 
+//--------------------------------------------------------------------------------
 void cmd_test()
 {
 	unsuppCmd = true;
 }
 
+//--------------------------------------------------------------------------------
 void ccRegWrite()	// CW cc register write
 {
 	int16_t pos;
@@ -1992,6 +2216,8 @@ void ccRegWrite()	// CW cc register write
 	}
 }
 
+//-- todo evtl in eigene lib
+//--------------------------------------------------------------------------------
 void cmd_config()	// C read ccRegister
 {
 	uint8_t reg;
@@ -2005,6 +2231,8 @@ void cmd_config()	// C read ccRegister
 	}
 }
 
+//-- todo evtl in eigene lib
+//--------------------------------------------------------------------------------
 void cmd_writeEEPROM()	// write EEPROM und CC11001 register
 {
 	uint8_t val;
@@ -2057,6 +2285,8 @@ void cmd_writeEEPROM()	// write EEPROM und CC11001 register
     }
 }
 
+//-- todo evtl in eigene lib, aber wie ist dann in der lib der Zugriff auf die arrays mac, ip, gateway und netmask?
+//--------------------------------------------------------------------------------
 void cmd_readEEPROM()	// R<adr>  read EEPROM
 {
 	// rN<adr16>  read 64 Byte from EEPROM 
@@ -2129,6 +2359,8 @@ void cmd_readEEPROM()	// R<adr>  read EEPROM
      unsuppCmd = true;
 }
 
+//-- todo evtl in eigene lib
+//--------------------------------------------------------------------------------
 void cmd_writePatable()
 {
   uint8_t val;
@@ -2143,6 +2375,7 @@ void cmd_writePatable()
   }
 }
 
+//--------------------------------------------------------------------------------
 void cmd_configFactoryReset()	// eC - initEEPROMconfig
 {
 	uint8_t statRadio;
@@ -2176,6 +2409,7 @@ void cmd_configFactoryReset()	// eC - initEEPROMconfig
 	}
 }
 
+//--------------------------------------------------------------------------------
 void cmd_ccFactoryReset()	// e<0-9>
 {
          if (cmdstring.charAt(0) == 'e' && isDigit(cmdstring.charAt(1))) {
@@ -2201,6 +2435,7 @@ void cmd_ccFactoryReset()	// e<0-9>
          }
 }
 
+//--------------------------------------------------------------------------------
 inline void getConfig()
 {
   SignalDetectorClass *SDptr;
@@ -2288,7 +2523,7 @@ inline void getConfig()
    MSG_PRINTLN("");
 }
 
-
+//--------------------------------------------------------------------------------
 inline void configCMD()
 {
   bool en;
@@ -2343,7 +2578,7 @@ inline void configCMD()
   storeFunctions(SDptr->MSenabled, SDptr->MUenabled, SDptr->MCenabled, SDptr->MredEnabled, SDptr->MdebEnabled, LEDenabled, SDptr->MSeqEnabled);
 }
 
-
+//--------------------------------------------------------------------------------
 inline void configSET()
 { 
 	char buffer[18];
@@ -2472,6 +2707,7 @@ inline void configSET()
 	}
 }
 
+//--------------------------------------------------------------------------------
 uint8_t radioDetekt(bool confmode, uint8_t Dstat)
 {
 	uint8_t pn;
@@ -2506,7 +2742,8 @@ uint8_t radioDetekt(bool confmode, uint8_t Dstat)
 	}
 	return Dstat;
 }
-	
+
+//--------------------------------------------------------------------------------
 inline void configRadio()
 {
 	uint8_t remRadionr;	// Radionr merken
@@ -2562,6 +2799,7 @@ inline void configRadio()
 	
 }
 
+//--------------------------------------------------------------------------------
 #ifdef ESP32
 inline void WiFiEvent()
 {
@@ -2606,6 +2844,7 @@ void ethernetLoop()
 }
 #endif
 
+//--------------------------------------------------------------------------------
 void serialEvent()
 {
   while (MSG_PRINTER.available())
@@ -2656,6 +2895,8 @@ void serialEvent()
   }
 }
 
+//-- todo evtl in eigene lib
+//--------------------------------------------------------------------------------
 inline unsigned long getUptime()
 {
 	unsigned long now = millis();
@@ -2669,12 +2910,15 @@ inline unsigned long getUptime()
 	return (0xFFFFFFFF / 1000) * times_rolled + (now / 1000);
 }
 
+//-- todo evtl in eigene lib
+//--------------------------------------------------------------------------------
 inline void getPing()
 {
 	MSG_PRINTLN(F("OK"));
 	delayMicroseconds(500);
 }
 
+//--------------------------------------------------------------------------------
 void en_dis_receiver(bool en_receiver)
 {
 	if (ccmode >= 15) {
@@ -2697,6 +2941,7 @@ void en_dis_receiver(bool en_receiver)
 	MSG_PRINT(F(" "));
 }
 
+//--------------------------------------------------------------------------------
 inline void changeReceiver()
 {
 	if (cmdstring.charAt(1) != 'Q' && cmdstring.charAt(1) != 'E') {
@@ -2758,6 +3003,7 @@ inline void changeReceiver()
 	bankOffset = remBankOffset;
 }
 
+//--------------------------------------------------------------------------------
 void setCCmode() {
   if (ccmode == 0) {	// normal OOK
     enableReceive();
@@ -2776,12 +3022,14 @@ void setCCmode() {
   }
 }
 
-  void printHex2(const uint8_t hex) {   // Todo: printf oder scanf nutzen
+//-- todo evtl in eigene lib
+//--------------------------------------------------------------------------------
+void printHex2(const uint8_t hex) {   // Todo: printf oder scanf nutzen
     if (hex < 16) {
       MSG_PRINT("0");
     }
     MSG_PRINT(hex, HEX);
-  }
+}
 
 
 //================================= EEProm commands ======================================
@@ -2801,6 +3049,7 @@ void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t de
 	tools::EEstore();
 }
 
+//--------------------------------------------------------------------------------
 void callGetFunctions(void)
 {
 	getFunctions(&musterDecA.MSenabled, &musterDecA.MUenabled, &musterDecA.MCenabled, &musterDecA.MredEnabled, &musterDecA.MdebEnabled, &LEDenabled, &musterDecA.MSeqEnabled);
@@ -2808,6 +3057,7 @@ void callGetFunctions(void)
 	getCSvar();
 }
 
+//--------------------------------------------------------------------------------
 void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *mseq)
 {
     uint8_t dat = tools::EEread(addr_featuresB);
@@ -2822,6 +3072,7 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     *mseq=bool (dat &(1<<6));
 }
 
+//--------------------------------------------------------------------------------
 void getCSvar(void)
 {
     uint8_t high;
@@ -2889,6 +3140,7 @@ void getCSvar(void)
     musterDecA.mcMinBitLen = musterDecB.mcMinBitLen;
 }
 
+//--------------------------------------------------------------------------------
 void getSelRadioBank(void)
 {
     //radionr = defSelRadio;
@@ -2911,11 +3163,12 @@ void getSelRadioBank(void)
     ccmode = ccmode & 0x0F;
 }
 
-
-void getEthernetConfig(void)
+//--------------------------------------------------------------------------------
+void getEthernetConfig(bool flag)
 {
 	uint8_t i;
 	
+  if (flag) {
 #ifdef MAPLE_Mini
 	if (tools::EEread(EE_MAC_ADDR) != mac_def[0] || tools::EEread(EE_MAC_ADDR+1) != mac_def[1] || tools::EEread(EE_MAC_ADDR+2) != mac_def[2]) {
 		initEthernetConfig();
@@ -2924,6 +3177,12 @@ void getEthernetConfig(void)
 		mac[i] = tools::EEread(EE_MAC_ADDR+i);
 	}
 #endif
+#ifdef ESP32
+	if (tools::EEread(EE_IP4_ADDR) == 0 || tools::EEread(EE_IP4_ADDR) == 255 || tools::EEread(EE_IP4_GATEWAY) == 0 || tools::EEread(EE_IP4_GATEWAY) == 255) {
+		initEthernetConfig();
+	}
+#endif
+  }
 	for (i = 0; i < 4; i++) {
 		ip[i] = tools::EEread(EE_IP4_ADDR+i);
 		gateway[i] = tools::EEread(EE_IP4_GATEWAY+i);
@@ -2931,6 +3190,7 @@ void getEthernetConfig(void)
 	}
 }
 
+//--------------------------------------------------------------------------------
 void initEthernetConfig(void)
 {
 	for (uint8_t i = 0; i < 4; i++) {
@@ -2953,6 +3213,7 @@ void initEthernetConfig(void)
 	tools::EEstore();
 }
 
+//--------------------------------------------------------------------------------
 void initEEPROMconfig(void)
 {
 	tools::EEwrite(addr_featuresA, 0x37);    	// Init EEPROM with all flags enabled, except red, nn and toggleBank
@@ -2979,6 +3240,7 @@ void initEEPROMconfig(void)
 	MSG_PRINTLN(F("Init eeprom to defaults"));
 }
 
+//--------------------------------------------------------------------------------
 void initEEPROM(void)
 {
   if (tools::EEread(EE_MAGIC_OFFSET) == VERSION_1 && tools::EEread(EE_MAGIC_OFFSET+1) == VERSION_2) {

@@ -127,7 +127,6 @@ public:
 	
 	uint16_t histo[maxNumPattern];
 	//uint8_t message[defMaxMsgSize];
-	BitStore<defMaxMsgSize/2> message;       // A store using 4 bit for every value stored. 
 	
 	char buf[350] = {};
 #ifdef DEBUGGLEICH
@@ -149,6 +148,7 @@ public:
 	int16_t buffer[2];                          // Internal buffer to store two pules length
 	int16_t* first;                             // Pointer to first buffer entry
 	int16_t* last;                              // Pointer to last buffer entry 
+	BitStore<defMaxMsgSize/2> message;       // A store using 4 bit for every value stored.
 	float tolFact;                          //
 	int16_t pattern[maxNumPattern];				// 1d array to store the pattern
 	int16_t ms0pattern[10];
