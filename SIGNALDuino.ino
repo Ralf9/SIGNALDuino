@@ -39,7 +39,7 @@
 #include "compile_config.h"
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.0-dev210610"
+#define PROGVERS               "4.2.0-dev210615"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -300,7 +300,7 @@ void cmd_writeEEPROM();
 void cmd_writePatable();
 void changeReceiver();
 void enableReceive();
-void disableReceive();
+void disableReceive(bool flagCCmode0);
 void callGetFunctions();
 void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *mseq);
 void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t deb, int8_t led, int8_t mseq);
@@ -830,9 +830,15 @@ void setup() {
 	getSelRadioBank();
 } //---  of setup
 
+
 //--------------------------------------------------------------------------------
+#if defined(ESP32)
 void IRAM_ATTR cronjob(void *pArg) {
 	cli();
+#else // MapleMini
+void cronjob();
+	noInterrupts();
+#endif
 	static uint16_t cnt0 = 0;
 	static uint8_t cnt1 = 0;
 	unsigned long durationA;
@@ -875,7 +881,11 @@ void IRAM_ATTR cronjob(void *pArg) {
 	 digitalWrite(PIN_LED, blinkLED);
 	 blinkLED = false;
 
+#ifdef MAPLE_Mini
+	interrupts();
+#else
 	sei();
+#endif
 	
 	if (cnt0++ == 0) {
 		if (cnt1++ == 0) {
@@ -1092,8 +1102,13 @@ void getRxFifo(uint16_t Boffs) {
 
 //========================= Pulseauswertung ================================================
 
+#if defined(ESP32)
 void IRAM_ATTR handleInterruptA() {
   cli();
+#else // MapleMini
+void handleInterruptA() {
+  noInterrupts();
+#endif
   const unsigned long Time=micros();
   const unsigned long  duration = Time - lastTimeA;
   lastTimeA = Time;
@@ -1111,11 +1126,20 @@ void IRAM_ATTR handleInterruptA() {
     lastFifoALowMax = false;
   } // else => trash
 
+#ifdef MAPLE_Mini
+  interrupts();
+#else
   sei();
+#endif
 }
 
-  void IRAM_ATTR handleInterruptB() {
+#if defined(ESP32)
+void IRAM_ATTR handleInterruptB() {
   cli();
+#else // MapleMini
+void handleInterruptB() {
+  noInterrupts();
+#endif
   const unsigned long Time=micros();
   const unsigned long  duration = Time - lastTimeB;
   lastTimeB = Time;
@@ -1133,7 +1157,11 @@ void IRAM_ATTR handleInterruptA() {
     lastFifoBLowMax = false;
   } // else => trash
 
+#ifdef MAPLE_Mini
+  interrupts();
+#else
   sei();
+#endif
 }
 
 //--------------------------------------------------------------------------------
@@ -1158,16 +1186,18 @@ void enableReceive() {
 }
 
 //--------------------------------------------------------------------------------
-void disableReceive() {
-  if (ccmode == 0 && radionr == 0) {
-    detachInterrupt(digitalPinToInterrupt(PIN_RECEIVE_A));
-    RXenabledSlowRfA = false;
-    FiFoA.flush();
-  }
-  if (ccmode == 0 && radionr == 1) {
-    detachInterrupt(digitalPinToInterrupt(PIN_RECEIVE_B));
-    RXenabledSlowRfB = false;
-    FiFoB.flush();
+void disableReceive(bool flagCCmode0) {
+  if (ccmode == 0 || flagCCmode0 == true) {
+    if (radionr == 0) {
+      detachInterrupt(digitalPinToInterrupt(PIN_RECEIVE_A));
+      RXenabledSlowRfA = false;
+      FiFoA.flush();
+    }
+    else if (radionr == 1) {
+      detachInterrupt(digitalPinToInterrupt(PIN_RECEIVE_B));
+      RXenabledSlowRfB = false;
+      FiFoB.flush();
+    }
   }
   #ifdef CMP_CC1101
   if (hasCC1101) cc1101::ccStrobe_SIDLE();	// Idle mode
@@ -1360,7 +1390,7 @@ void send_cmd()
 	uint8_t ccParamAnz = 0;   // Anzahl der per F= uebergebenen cc1101 Register
 	uint8_t val;
 
-	disableReceive();
+	disableReceive(false);
 
 	uint8_t cmdNo=255;
 
@@ -1582,7 +1612,7 @@ void send_ccFIFO()
 		//MSG_PRINT(F(" end="));
 		//MSG_PRINTLN(enddata);
 		if (enddata > startdata) {
-			disableReceive();
+			disableReceive(false);
 			for (uint8_t i = 0; i < repeats; i++) {
 				if (cc1101::setTransmitMode() == false) {
 					startdata = -1;
@@ -2932,7 +2962,7 @@ void en_dis_receiver(bool en_receiver)
 		MSG_PRINT(F("=1"));
 	}
 	else {
-		disableReceive();
+		disableReceive(false);
 		RXenabled[radionr] = false;
 		MSG_PRINT(F("rx"));
 		MSG_WRITE('A' + radionr);
@@ -3015,7 +3045,7 @@ void setCCmode() {
     if (radionr <= 1) {
        pinAsInput(pinSend[radionr]);
     }
-    disableReceive();
+    disableReceive(true);  // bei xFSK das Auslesen der Daten ueber GDO2 deaktivieren
     if (cc1101::flushrx()) {
       enableReceive();
     }
