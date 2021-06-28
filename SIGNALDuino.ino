@@ -39,7 +39,7 @@
 #include "compile_config.h"
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.0-dev210615"
+#define PROGVERS               "4.2.0-dev210628"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -324,7 +324,7 @@ void printHex2(const uint8_t hex);
 void setHasCC1101(uint8_t val);
 
 //--- platform specific forwards @ main ------------------------------------------
-#if defined(ESP32)
+#ifdef ESP32
 	inline void WiFiEvent();
 	void IRAM_ATTR cronjob(void *pArg);
 #else
@@ -832,11 +832,11 @@ void setup() {
 
 
 //--------------------------------------------------------------------------------
-#if defined(ESP32)
+#ifdef ESP32
 void IRAM_ATTR cronjob(void *pArg) {
 	cli();
 #else // MapleMini
-void cronjob();
+void cronjob() {
 	noInterrupts();
 #endif
 	static uint16_t cnt0 = 0;
@@ -1102,7 +1102,7 @@ void getRxFifo(uint16_t Boffs) {
 
 //========================= Pulseauswertung ================================================
 
-#if defined(ESP32)
+#ifdef ESP32
 void IRAM_ATTR handleInterruptA() {
   cli();
 #else // MapleMini
@@ -1133,7 +1133,7 @@ void handleInterruptA() {
 #endif
 }
 
-#if defined(ESP32)
+#ifdef ESP32
 void IRAM_ATTR handleInterruptB() {
   cli();
 #else // MapleMini

@@ -34,7 +34,7 @@
 #define isHigh(P)((*(pinOfPin(P))& pinMask(P))>0)
 #define isLow(P)((*(pinOfPin(P))& pinMask(P))==0)
 #define digitalState(P)((uint8_t)isHigh(P))
-#elif MAPLE_Mini
+#elif defined(MAPLE_Mini)
 	#define pinAsInput(pin) pinMode(pin, INPUT)
 	#define pinAsOutput(pin) pinMode(pin, OUTPUT)
 	#define pinAsInputPullUp(pin) pinMode(pin, INPUT_PULLUP)

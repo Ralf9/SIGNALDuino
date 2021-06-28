@@ -34,7 +34,7 @@
 ||
 */
 
-#define FIFO_LENGTH            200
+//#define FIFO_LENGTH            200
 
 class SimpleFIFO {
 public:
@@ -42,7 +42,11 @@ public:
 	SimpleFIFO(uint8_t rawsize);
 
 	int16_t dequeue();				//get next element
+#ifdef ESP32
 	void IRAM_ATTR enqueue(int16_t element );	//add an element
+#else
+	void enqueue(int16_t element );	//add an element
+#endif
 	void flush();				//[1.1] reset to default state 
 	
 	uint8_t count() { return numberOfElements; }
@@ -61,7 +65,11 @@ SimpleFIFO::SimpleFIFO(uint8_t rawsize)
 	flush();
 }
 
+#ifdef ESP32
 void IRAM_ATTR SimpleFIFO::enqueue(int16_t element) {
+#else
+void SimpleFIFO::enqueue(int16_t element) {
+#endif
 	if ( numberOfElements >=  size) { return; }
 	numberOfElements++;
 	nextIn %= size;
