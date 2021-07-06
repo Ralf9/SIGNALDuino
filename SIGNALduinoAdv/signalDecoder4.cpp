@@ -623,7 +623,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 					#endif
 			        }
 				else {
-					char msbuf[15];
+					char msbuf[20];
 					uint8_t idx;
 					
 					if (MsMoveCount == 0) {
@@ -689,7 +689,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 						msEqCnt++;
 					}
 					if (MsEqSkip == 0) {
-						MSG_WRITE(buf,n);
+						MSG_WRITE((const uint8_t *)buf,n);
 					
 						n = sprintf(msbuf, ";CP=%x;SP=%x;", clock, sync); // ClockPulse & SyncPulse
 						MSG_PRINT(msbuf);
@@ -1114,7 +1114,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 								buf[i] = (n >> 4) + '0';
 								buf[i+1] = (n & 15) + '0';
 							}
-							MSG_WRITE(buf,maxi);
+							MSG_WRITE((const uint8_t *)buf,maxi);
 						}
 					}
 					else {
@@ -1699,7 +1699,7 @@ void ManchesterpatternDecoder::printBufMessageHexStr()
 		pdec->buf[i] = hex[n & 0x0F];
 		i++;
 	}
-	MSG_WRITE(pdec->buf,i);
+	MSG_WRITE((const uint8_t *)pdec->buf,i);
 }
 
 
@@ -2333,4 +2333,3 @@ const bool ManchesterpatternDecoder::isManchester()
 	}
 	return false;
 }
-

@@ -5,9 +5,11 @@
 
 #ifndef MAPLE_Mini
 #include <EEPROM.h>
-#elif defined(MAPLE_Mini) and ARDUINO > 190
-#include <EEPROM.h>
+//#elif defined(MAPLE_Mini) and ARDUINO > 190
+//#include <EEPROM.h>
 #endif
+
+#include <Arduino.h>
 
 extern uint16_t bankOffset;
 extern String cmdstring;

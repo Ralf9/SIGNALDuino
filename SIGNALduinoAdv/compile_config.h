@@ -5,7 +5,7 @@
 //#define MAPLE_SDUINO 1
 //#define MAPLE_CUL 1
 //#define BLACK_BOARD 1  // 1 - USB, 2 - serial USART2 fuer ESP
-#define SIGNALESP32 1
+//#define SIGNALESP32 1
 //#define EVIL_CROW_RF 1
 //#define ESP32_SDUINO_TEST 1
 

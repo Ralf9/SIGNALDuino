@@ -37,9 +37,10 @@
 */
 
 #include "compile_config.h"
+#include <Arduino.h>
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.0-dev210628"
+#define PROGVERS               "4.2.1-dev210706"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -311,6 +312,8 @@ void getRxFifo(uint16_t Boffs);
 void print_bank_sum();
 void print_Bank();
 void en_dis_receiver(bool en_receiver);
+void getEthernetConfig(bool flag);
+void initEthernetConfig();
 void initEEPROM();
 void initEEPROMconfig();
 void serialEvent();
@@ -324,6 +327,9 @@ void printHex2(const uint8_t hex);
 void setHasCC1101(uint8_t val);
 
 //--- platform specific forwards @ main ------------------------------------------
+#ifdef LAN_WIZ
+  void ethernetLoop();
+#endif
 #ifdef ESP32
 	inline void WiFiEvent();
 	void IRAM_ATTR cronjob(void *pArg);
@@ -2158,7 +2164,12 @@ void cmd_uptime()	// t: Uptime
 //--------------------------------------------------------------------------------
 void cmd_test()
 {
-	unsuppCmd = true;
+	#ifdef ARDUINO
+	   MSG_PRINT("a=");
+     MSG_PRINTLN(ARDUINO);
+	#else
+	   unsuppCmd = true;
+  #endif
 }
 
 //--------------------------------------------------------------------------------

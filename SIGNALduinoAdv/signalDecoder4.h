@@ -214,8 +214,8 @@ public:
 	SignalDetectorClass *pdec;
 	int8_t longlow;
 	int8_t longhigh;
-	int8_t shortlow;
 	int8_t shorthigh;
+	int8_t shortlow;
 	int16_t clock; // Manchester calculated clock		
 	int8_t minbitlen;
 	uint16_t mc_sync_pos;
@@ -229,4 +229,3 @@ public:
 
 
 #endif
-
