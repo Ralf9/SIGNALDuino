@@ -1,4 +1,4 @@
-# SIGNALDuino uC v4.2.0 (development version) for Maple Mini and ESP32 with multi cc1101 and xFSK support
+# SIGNALDuino uC v4.2.1 (development version) for Maple Mini and ESP32 with multi cc1101 and xFSK support
 
 ### Getting started
 
@@ -19,7 +19,7 @@ signalDecoder4.cpp
 
 signalDecoder4.h
 
-SIGNALDuino.ino
+SIGNALDuinonew.ino
 
 SimpleFIFO.h
 
