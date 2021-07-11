@@ -3,10 +3,10 @@
 #ifndef _tools_h
 #define _tools_h
 
-#ifndef MAPLE_Mini
-#include <EEPROM.h>
-//#elif defined(MAPLE_Mini) and ARDUINO > 190
-//#include <EEPROM.h>
+// wenn definiert, dann kein include EEPROM.h
+// bei Maple Mini sind die EEPROM Routinen im core 1.9.0 enthalten
+#ifndef NO_INCLUDE_EEPROM
+	#include <EEPROM.h>
 #endif
 
 #include <Arduino.h>

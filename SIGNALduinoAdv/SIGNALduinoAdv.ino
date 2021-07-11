@@ -29,7 +29,7 @@
 *   You should have received a copy of the GNU General Public License
 *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-* Version from: https://github.com/Ralf9/SIGNALDuino/tree/dev-r420_cc1101
+* Version from: https://github.com/Ralf9/SIGNALDuino/tree/dev-r421_cc1101
 
 *------------------------------------------------------------------------------------------
 
@@ -40,7 +40,7 @@
 #include <Arduino.h>
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.1-dev210706"
+#define PROGVERS               "4.2.1-dev210711"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 

@@ -28,36 +28,19 @@
 // ---------------------------------------
 // Do not Change anything below this line
 
-#ifdef OTHER_BOARD_WITH_CC1101
-	#define CMP_CC1101
-#endif
-#ifdef ARDUINO_ATMEGA328P_MINICUL
-	#define CMP_CC1101
-#endif
-#ifdef MAPLE_SDUINO
+#define CMP_CC1101
+
+#if defined(MAPLE_SDUINO) || defined(MAPLE_CUL)
 	#define MAPLE_Mini
-	#define CMP_CC1101
-#endif
-#ifdef MAPLE_CUL
-	#define MAPLE_Mini
-	#define CMP_CC1101
+	#ifndef PLATFORMIO
+		#if ARDUINO == 10808
+    		#define NO_INCLUDE_EEPROM
+		#endif
+	#endif 
 #endif
 #ifdef BLACK_BOARD
 	#define MAPLE_Mini
-	#define CMP_CC1101
 #endif
 #if BLACK_BOARD == 2
 	#define SERIAL_USART2
-#endif
-#ifdef SIGNALESP32
-	#define CMP_CC1101
-#endif
-#ifdef ESP32_SDUINO
-	#define CMP_CC1101
-#endif
-#ifdef EVIL_CROW_RF
-	#define CMP_CC1101
-#endif
-#ifdef ESP32_SDUINO_TEST
-	#define CMP_CC1101
 #endif
