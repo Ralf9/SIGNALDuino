@@ -4,34 +4,22 @@
 
 System to receive digital signals and provide them to other systems pro demodulatiob.
 
-Compile it and have fun.
-If you are using the Arduino IDE, you have to copy the following libs into your sketch folder:
+Firmware files  are in https://github.com/Ralf9/SIGNALDuino/releases
 
-bitstore4.h
-
-cc1101.h
-
-compile_config.h
-
-output.h
-
-signalDecoder4.cpp
-
-signalDecoder4.h
-
-SIGNALDuinonew.ino
-
-SimpleFIFO.h
-
-tools.h
+Compile it or use the and have fun.  
+- If you are using the Arduino IDE, you have to copy the folder "SIGNALduinoAdv" with its contents into your sketch folder.  
+- If you are using platformio, you have to copy the files "extra_script.py", "platformio.ini" and the folder "SIGNALduinoAdv" with its contents into your project folder. 
 
 ### Using SIGNALDuino in FHEM
 
-If you want to use the SIGNALDuino with FHEM, you can use it directly from FHEM. No neet to compile any sourcode.
+If you want to use the SIGNALDuino with FHEM, you can use it directly from FHEM. No need to compile any sourecode.
+You find more Information here: https://wiki.fhem.de/wiki/Maple-SignalDuino  
+https://forum.fhem.de/index.php/topic,106278.0.html
 
 ### Tested microcontrollers
 
-* MapleMini
+* STM32 F103CBT6 (Maple Mini, bootloader v2.0)
+* ESP32
 
 ### Signal from my device ist not detected
 
