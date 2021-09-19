@@ -35,27 +35,51 @@
 
 // Config flags for compiling correct options / boards Define only one
 
-#define ARDUINO_ATMEGA328P_MINICUL 1
-//#define OTHER_BOARD_WITH_CC1101  1
+//#define ARDUINO_ATMEGA328P_MINICUL 1
+//#define ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101 1
+//#define ARDUINO_BUSWARE_CUL 1                                 // BusWare CUL V3 (ATmega32U4)
+#define OTHER_BOARD_WITH_CC1101  1
 
 //#define CMP_MEMDBG 1
 
 // bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten 
 
 #ifdef OTHER_BOARD_WITH_CC1101
-	#define CMP_CC1101     
+	#define CMP_CC1101
 #endif
 #ifdef ARDUINO_ATMEGA328P_MINICUL
-	#define CMP_CC1101     
+	#define CMP_CC1101
+#endif
+#ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
+	#define CMP_CC1101
+	#define ONLY_FSK
+#endif
+#ifdef ARDUINO_BUSWARE_CUL
+	#define CMP_CC1101
+	#define ONLY_FSK
 #endif
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.4-dev200914"
+#define PROGVERS               "3.3.4-dev210919"
 #define VERSION_1               0x33
 #define VERSION_2               0x40
 
 #ifdef CMP_CC1101
-	#if ARDUINO_ATMEGA328P_MINICUL  // 8Mhz 
+	#ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
+		#define PIN_LED               13
+		#define PIN_SEND              9   // gdo0Pin TX out
+		#define PIN_RECEIVE				   7
+		#define digitalPinToInterrupt(p) ((p) == 0 ? 2 : ((p) == 1 ? 3 : ((p) == 2 ? 1 : ((p) == 3 ? 0 : ((p) == 7 ? 4 : NOT_AN_INTERRUPT)))))
+		#define PIN_MARK433			  4
+		#define SS					  8  
+	#elif ARDUINO_BUSWARE_CUL
+		#define PIN_LED                  7 // LED_BUILTIN
+		#define PIN_SEND                 1 // gdo0Pin TX out
+		#define PIN_RECEIVE              0 // gdo2
+		#define digitalPinToInterrupt(p) ((p) == 0 ? 2 : ((p) == 1 ? 3 : ((p) == 2 ? 1 : ((p) == 3 ? 0 : ((p) == 7 ? 4 : NOT_AN_INTERRUPT)))))
+		#define PIN_MARK433              10
+		#define SS                       17
+	#elif ARDUINO_ATMEGA328P_MINICUL  // 8Mhz 
 		#define PIN_LED               4
 		#define PIN_SEND              2   // gdo0Pin TX out
 		#define PIN_RECEIVE           3
@@ -408,6 +432,7 @@ void loop() {
 #ifdef WATCHDOG
 	wdt_reset();
 #endif
+#ifndef ONLY_FSK
   if (ccmode == 0) {
 	musterDec.printMsgSuccess = false;
 	musterDec.NoMsgEnd = false;
@@ -438,6 +463,9 @@ void loop() {
 	}
   }
   else {
+#else
+  if (ccmode > 0) {
+#endif
 	uint8_t fifoBytes;
 	bool dup;		// true bei identischen Wiederholungen bei readRXFIFO
 
@@ -554,9 +582,11 @@ void handleInterrupt() {
 
 void enableReceive() {
   if (RXenabled == true) {
+   #ifndef ONLY_FSK
    if (ccmode == 0) {	// normal
      attachInterrupt(digitalPinToInterrupt(PIN_RECEIVE), handleInterrupt, CHANGE);
    }
+   #endif
    #ifdef CMP_CC1101
    if (hasCC1101) {
      cc1101::ccStrobe_SIDLE();	// Idle mode
@@ -1202,6 +1232,9 @@ void cmd_Version()	// V: Version
 	}
 #ifdef SENDTODECODER
 	MSG_PRINT(F("(no receive, only send to decoder) "));
+#endif
+#ifdef ONLY_FSK
+    MSG_PRINT(F("only xFSK "));
 #endif
 	MSG_PRINT(F("(b"));
 	if (toggleBankEnabled == false) {
