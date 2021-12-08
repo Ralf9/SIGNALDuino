@@ -60,7 +60,7 @@
 #endif
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.4-dev210919"
+#define PROGVERS               "3.3.4-dev211207"
 #define VERSION_1               0x33
 #define VERSION_2               0x40
 
@@ -72,14 +72,15 @@
 		#define digitalPinToInterrupt(p) ((p) == 0 ? 2 : ((p) == 1 ? 3 : ((p) == 2 ? 1 : ((p) == 3 ? 0 : ((p) == 7 ? 4 : NOT_AN_INTERRUPT)))))
 		#define PIN_MARK433			  4
 		#define SS					  8  
-	#elif ARDUINO_BUSWARE_CUL
+	#elif ARDUINO_BUSWARE_CUL  // 8MHz
 		#define PIN_LED                  7 // LED_BUILTIN
 		#define PIN_SEND                 1 // gdo0Pin TX out
 		#define PIN_RECEIVE              0 // gdo2
 		#define digitalPinToInterrupt(p) ((p) == 0 ? 2 : ((p) == 1 ? 3 : ((p) == 2 ? 1 : ((p) == 3 ? 0 : ((p) == 7 ? 4 : NOT_AN_INTERRUPT)))))
 		#define PIN_MARK433              10
 		#define SS                       17
-	#elif ARDUINO_ATMEGA328P_MINICUL  // 8Mhz 
+		#include <avr/power.h>
+	#elif ARDUINO_ATMEGA328P_MINICUL  // 8MHz
 		#define PIN_LED               4
 		#define PIN_SEND              2   // gdo0Pin TX out
 		#define PIN_RECEIVE           3
@@ -289,6 +290,9 @@ uint8_t rssiCallback() { return 0; };	// Dummy return if no rssi value can be re
 
 
 void setup() {
+#if defined(ARDUINO_BUSWARE_CUL)
+	clock_prescale_set(clock_div_1);
+#endif
 	uint8_t ccVersion;
 	Serial.begin(BAUDRATE);
 	while (!Serial) {
@@ -1038,10 +1042,44 @@ void cmd_bank()
 {
 	if (isDigit(cmdstring.charAt(1))) {
 		uint8_t digit;
+		uint16_t bankOffsetOld = bankOffset;
 		digit = (uint8_t)cmdstring.charAt(1);
 		bank = cc1101::hex2int(digit);
 		bankOffset = getBankOffset(bank);
 		if (bank == 0 || cmdstring.charAt(0) == 'e' || (EEPROM.read(bankOffset) == bank && EEPROM.read(bankOffset + 1) == (255 - bank))) {
+		  if (cmdstring.charAt(2) == 'f') {
+			uint8_t ccmodeOld = ccmode;
+			ccmode = EEPROM.read(bankOffset + addr_ccmode);
+			if (ccmodeOld > 0 && ccmode > 0) {
+				cc1101::ccStrobe_SIDLE();	// Idle mode
+				uint8_t val;
+				uint8_t n = 0;
+				for (uint8_t i = 0; i <= 0x26; i++) {
+					val = EEPROM.read(bankOffset + 2 + i);
+					if (val != EEPROM.read(bankOffsetOld + 2 + i)) {
+						n++;
+						//printHex2(i);
+						//printHex2(val);
+						//MSG_PRINT(F(" "));
+						cc1101::writeReg(i,val);
+					}
+				}
+				//MSG_PRINTLN("");
+				cc1101::flushrx();
+				cc1101::setReceiveMode();
+				MSG_PRINT("fn=");
+				MSG_PRINT(n);
+				MSG_PRINT(" ");
+				print_Bank();
+			}
+			else {
+				bankOffset = bankOffsetOld;
+				bank = EEPROM.read(addr_bank);
+				ccmode = ccmodeOld;
+				MSG_PRINTLN(F("ccmode not valid"));
+			}
+		  }
+		  else {
 			if (cmdstring.charAt(2) == 'W') {
 				EEPROM.write(addr_bank, bank);
 				MSG_PRINT(F("write "));
@@ -1058,6 +1096,7 @@ void cmd_bank()
 				cc1101::CCinit();
 				setCCmode();
 			}
+		  }
 		}
 		else {
 			MSG_PRINT(F("The Bank "));
@@ -1224,10 +1263,15 @@ void cmd_Version()	// V: Version
 	MSG_PRINT(F("V " PROGVERS " SIGNALduino "));
 	if (hasCC1101) {
 	    MSG_PRINT(F("cc1101 "));
-#ifdef PIN_MARK433
+#ifdef ARDUINO_ATMEGA328P_MINICUL
 	    MSG_PRINT(F("(minicul "));
+#endif
+#ifdef ARDUINO_BUSWARE_CUL
+	    MSG_PRINT(F("(culV3 "));
+#endif
+#ifdef PIN_MARK433
 	    MSG_PRINT(isLow(PIN_MARK433) ? "433" : "868");
-	    MSG_PRINT(F("Mhz) "));
+	    MSG_PRINT(F("MHz) "));
 #endif
 	}
 #ifdef SENDTODECODER
@@ -1273,7 +1317,7 @@ void cmd_uptime()	// t: Uptime
 
 void cmd_test()	// T<bank><sec>
 {
-		unsuppCmd = true;
+    unsuppCmd = true;
 }
 
 void ccRegWrite()	// CW cc register write
@@ -1282,7 +1326,7 @@ void ccRegWrite()	// CW cc register write
 	uint8_t val;
 	uint8_t reg;
 	uint8_t i;
-	uint8_t tmp_ccN = 0;
+	uint8_t tmp_ccN = 0xFF;
 	uint8_t tmp_ccmode = 0xFF;
 	bool flag = false;
 	
@@ -1324,7 +1368,6 @@ void ccRegWrite()	// CW cc register write
 			reg = reg + (bank * 8);
 			EEPROM.write(reg, val);
 		}
-		EEPROM.write(bankOffset + reg, val);
 		/*MSG_PRINT(F("reg="));
 		printHex2(reg);
 		MSG_PRINT(F(" val="));
@@ -1340,7 +1383,7 @@ void ccRegWrite()	// CW cc register write
 	MSG_PRINT(cmdstring); // echo
 	if (flag) {
 		MSG_PRINT(F(" ok"));
-		if (tmp_ccN > 0) {
+		if (tmp_ccN != 0xFF) {
 			MSG_PRINT(F(",N="));
 			MSG_PRINT(tmp_ccN);
 			//ccN = tmp_ccN;
@@ -1519,6 +1562,8 @@ inline void getConfig()
   else {
     MSG_PRINT(F("ccmode="));
     MSG_PRINT(ccmode);
+    MSG_PRINT(F(" b="));
+    MSG_PRINT(bank);
   }
    if (LEDenabled == false) {
       MSG_PRINT(F(";LED=0"));
@@ -1526,9 +1571,9 @@ inline void getConfig()
    if (RXenabled == false) {
       MSG_PRINT(F(";RX=0"));
    }
-   if (toggleBankEnabled == true) {
+   /*if (toggleBankEnabled == true) {
       MSG_PRINT(F(";toggleBank=1"));
-   }
+   }*/
   if (ccmode == 0) {
    if (musterDec.MuNoOverflow == true) {
       MSG_PRINT(F(";MuNoOverflow=1"));
