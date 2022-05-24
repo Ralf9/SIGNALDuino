@@ -37,7 +37,8 @@
 	//#include "WProgram.h"
 #endif
 
-#define CMP_CC1101
+#include "compile_config.h"
+
 #define DEBUG 1
 
 #include "output.h"
