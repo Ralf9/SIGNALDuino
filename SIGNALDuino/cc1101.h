@@ -11,10 +11,10 @@
 #include <EEPROM.h>
 #include "output.h"
 
-
+#define ccMaxBuf 50
 extern uint16_t bankOffset;
 extern String cmdstring;
-extern uint8_t ccBuf[50];
+extern uint8_t ccBuf[ccMaxBuf + 2];
 
 
 namespace cc1101 {
@@ -29,7 +29,10 @@ namespace cc1101 {
 	#endif
 	*/
 	
-#define csPin	SS	   // CSN  out
+	#define addr_CWccreset     0x3A   // wenn A5 oder A6, dann erfolgt bei CW (ccRegWrite) ein ccReset
+	#define addr_CWccTEST      0x3B   // wenn = 6x und addr_CWccreset = A5 dann werden beim CCinit_reg auch CC1101_TEST2 - TEST0 gesetzt
+	
+	#define csPin	SS	   // CSN  out
 	#define mosiPin MOSI   // MOSI out
 	#define misoPin MISO   // MISO in
 	#define sckPin  SCK    // SCLK out	
@@ -46,10 +49,13 @@ namespace cc1101 {
 	#define CC1101_FREQ1       0x0E  // Frequency control word, middle byte
 	#define CC1101_FREQ0       0x0F  // Frequency control word, low byte
 	#define CC1101_IOCFG2      0x00  // GDO2 output configuration
+	#define CC1101_PKTCTRL1    0x07
 	#define CC1101_PKTCTRL0    0x08  // Packet config register
 	#define CC1101_MDMCFG4     0x10
 	#define CC1101_MDMCFG3     0x11
 	#define CC1101_MDMCFG2     0x12
+	#define CC1101_TEST2       0x2C
+	
 	
 	// Multi byte memory locations
 	#define CC1101_PATABLE          0x3E  // 8 byte memory
@@ -400,9 +406,13 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 }
 
 
-	void ccFactoryReset() {
+	void ccFactoryReset(bool flag) {
 		for (uint8_t i = 0; i<sizeof(initVal); i++) {
-        		EEPROM.write(bankOffset + EE_CC1101_CFG + i, pgm_read_byte(&initVal[i]));
+			EEPROM.write(bankOffset + EE_CC1101_CFG + i, pgm_read_byte(&initVal[i]));
+		}
+		EEPROM.write(bankOffset + addr_CWccreset, 0xFF);
+		if (flag == false) {
+			return;
 		}
 		for (uint8_t i = 0; i < 8; i++) {
 			if (i == 1) {
@@ -474,18 +484,30 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		return readReg(CC1101_RXBYTES,CC1101_STATUS);  // 
 	}
 	
-	bool readRXFIFO(uint8_t len) {
+	bool readRXFIFO(uint8_t len, uint8_t ccmode, bool appendrssi) {
 		bool dup = true;
-		uint8_t rx;
 		
 		cc1101_Select();                                // select CC1101
 		//waitV_Miso();                                    // wait until MISO goes low
 		sendSPI(CC1101_RXFIFO | CC1101_READ_BURST);    // send register address
-		for (uint8_t i = 0; i < len; i++) {
-			rx = sendSPI(0x00);        // read result
-			if (rx != ccBuf[i]) {
-				dup = false;
-				ccBuf[i] = rx;
+		if (ccmode != 2) {
+			for (uint8_t i = 0; i < len; i++) {
+				ccBuf[i] = sendSPI(0x00);        // read result
+			}
+		}
+		else {
+			uint8_t rx;
+			for (uint8_t i = 0; i < len; i++) {
+				rx = sendSPI(0x00);        // read result
+				if (rx != ccBuf[i]) {
+					if (i < len-2) {
+						dup = false;
+					}
+					else if (appendrssi == false) {
+						dup = false;
+					}
+					ccBuf[i] = rx;
+				}
 			}
 		}
 		cc1101_Deselect();
@@ -614,6 +636,11 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		cc1101_Deselect();
 		delayMicroseconds(10);            // ### todo: welcher Wert ist als delay sinnvoll? ###
 
+		if (EEPROM.read(bankOffset + addr_CWccreset) == 0xA5 && ((EEPROM.read(bankOffset + addr_CWccTEST) & 0xF0) == 0x60)) {
+			for (uint8_t i = 0; i<3; i++) {
+				writeReg(CC1101_TEST2 + i, EEPROM.read(bankOffset + CC1101_TEST2 + i));
+			}
+		}
 		writePatable();                                 // write PatableArray to patable reg
 
 		cmdStrobe(CC1101_SCAL); 
