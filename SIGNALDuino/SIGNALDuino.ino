@@ -1,5 +1,5 @@
 /*
-*   RF_RECEIVER v3.34 for Arduino
+*   RF_RECEIVER v3.35 for Arduino
 *   Sketch to use an arduino as a receiver/sending device for digital signals
 *
 *   The Sketch can also encode and send data via a transmitter,
@@ -28,39 +28,14 @@
 *   You should have received a copy of the GNU General Public License
 *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-	Version from: https://github.com/Ralf9/SIGNALDuino/tree/dev-r334_cc1101
+	Version from: https://github.com/Ralf9/SIGNALDuino/tree/dev-r335_cc1101
 
 */
 
-
-// Config flags for compiling correct options / boards Define only one
-
-//#define ARDUINO_ATMEGA328P_MINICUL 1
-//#define ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101 1
-//#define ARDUINO_BUSWARE_CUL 1                                 // BusWare CUL V3 (ATmega32U4)
-#define OTHER_BOARD_WITH_CC1101  1
-
-//#define CMP_MEMDBG 1
-
-// bitte auch das "#define CMP_CC1101" in der SignalDecoder.h beachten 
-
-#ifdef OTHER_BOARD_WITH_CC1101
-	#define CMP_CC1101
-#endif
-#ifdef ARDUINO_ATMEGA328P_MINICUL
-	#define CMP_CC1101
-#endif
-#ifdef ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101
-	#define CMP_CC1101
-	#define ONLY_FSK
-#endif
-#ifdef ARDUINO_BUSWARE_CUL
-	#define CMP_CC1101
-	#define ONLY_FSK
-#endif
+#include "compile_config.h"
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.4-dev211207"
+#define PROGVERS               "3.3.5-dev210522"
 #define VERSION_1               0x33
 #define VERSION_2               0x40
 
@@ -100,9 +75,6 @@
 #define BAUDRATE               57600
 #define FIFO_LENGTH            140 // 50
 
-//#define WATCHDOG	1 // Der Watchdog ist in der Entwicklungs und Testphase deaktiviert. Es muss auch ohne Watchdog stabil funktionieren.
-//#define DEBUGSENDCMD  1
-//#define SENDTODECODER 1 // damit wird in der send_raw Routine anstatt zu senden, die Pulse direkt dem Decoder uebergeben
 #define DEBUG                  1
 
 #ifdef WATCHDOG
@@ -126,7 +98,7 @@ SignalDetectorClass musterDec;
 #define maxCmdString 350  //350 // 250
 #define maxSendPattern 8
 #define mcMinBitLenDef   17
-#define ccMaxBuf 50
+//#define ccMaxBuf 50
 #define maxSendEcho 100
 
 // EEProm Address
@@ -154,7 +126,7 @@ uint8_t bank = 0;
 uint16_t bankOffset = 0;
 //uint8_t ccN = 0;
 uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 - FIFO LaCrosse, 4 - FIFO LaCrosse, 9 - FIFO mit Debug Ausgaben
-uint8_t ccBuf[ccMaxBuf];
+uint8_t ccBuf[ccMaxBuf+2];
 
 void cmd_help_S();
 void cmd_help();
@@ -485,7 +457,14 @@ void loop() {
 		fifoBytes = cc1101::getRXBYTES(); // & 0x7f; // read len, transfer RX fifo
 		if (fifoBytes > 0) {
 			uint8_t marcstate;
-			uint8_t RSSI = cc1101::getRSSI();
+			bool appendRSSI = false;
+			uint8_t RSSI;
+			if ((EEPROM.read(bankOffset + 2 +CC1101_PKTCTRL1) & 4) == 4) {
+				appendRSSI = true;
+			}
+			else {
+				RSSI = cc1101::getRSSI();
+			}
 			
 			if (ccmode == 9) {
 				MSG_PRINT(F("RX("));
@@ -496,7 +475,7 @@ void loop() {
 				if (fifoBytes > ccMaxBuf) {
 					fifoBytes = ccMaxBuf;
 				}
-				dup = cc1101::readRXFIFO(fifoBytes);
+				dup = cc1101::readRXFIFO(fifoBytes, ccmode, appendRSSI);
 				if (ccmode != 2 || dup == false) {
 					if (ccmode != 9) {
 						MSG_PRINT(MSG_START);
@@ -517,8 +496,13 @@ void loop() {
 							MSG_PRINT(F(";N="));
 							MSG_PRINT(n);
 						}
-						MSG_PRINT(F(";R="));
-						MSG_PRINT(RSSI);
+						if (appendRSSI == true) {
+							MSG_PRINT(F(";r"));
+						}
+						else {
+							MSG_PRINT(F(";R="));
+							MSG_PRINT(RSSI);
+						}
 						MSG_PRINT(F(";"));
 						MSG_PRINT(MSG_END);
 						MSG_PRINT("\n");
@@ -549,6 +533,9 @@ void loop() {
 					if (cc1101::flushrx()) {		// Flush the RX FIFO buffer
 						cc1101::setReceiveMode();
 					}
+				}
+				else if (marcstate != 13 && ccmode < 3) {  // marcstate 13 ist rx
+					cc1101::setReceiveMode();
 				}
 			}
 		}
@@ -966,8 +953,15 @@ void send_ccFIFO()
 			}
 			MSG_PRINT(cmdstring); // echo
 			MSG_PRINT(F("Marcs="));
-			MSG_PRINTLN(cc1101::getMARCSTATE());
-			enableReceive();
+			uint8_t marcstate = cc1101::getMARCSTATE();
+			MSG_PRINTLN(marcstate);  // 13 - rx
+			if (marcstate != 13 && RXenabled == true) {
+				if (marcstate != 1) {          // not idle
+					cc1101::ccStrobe_SIDLE();  // goto Idle mode
+					delay(1);
+				}
+				cc1101::setReceiveMode();
+			}
 		}
 		else {
 			startdata = -1;
@@ -1042,10 +1036,21 @@ void cmd_bank()
 {
 	if (isDigit(cmdstring.charAt(1))) {
 		uint8_t digit;
+		uint8_t bankOld = bank;
 		uint16_t bankOffsetOld = bankOffset;
 		digit = (uint8_t)cmdstring.charAt(1);
 		bank = cc1101::hex2int(digit);
 		bankOffset = getBankOffset(bank);
+		if (cmdstring.charAt(2) == '-' && bank > 0 && bank != bankOld) {  // Bank deaktivieren (ungueltig)
+			EEPROM.write(bankOffset, 255);
+			EEPROM.write(bankOffset+1, 255);
+			MSG_PRINT(F("Bank "));
+			MSG_PRINT(bank);
+			MSG_PRINTLN(F(" clear"));
+			bank = bankOld;
+			bankOffset = bankOffsetOld;
+			return;
+		}
 		if (bank == 0 || cmdstring.charAt(0) == 'e' || (EEPROM.read(bankOffset) == bank && EEPROM.read(bankOffset + 1) == (255 - bank))) {
 		  if (cmdstring.charAt(2) == 'f') {
 			uint8_t ccmodeOld = ccmode;
@@ -1074,7 +1079,7 @@ void cmd_bank()
 			}
 			else {
 				bankOffset = bankOffsetOld;
-				bank = EEPROM.read(addr_bank);
+				bank = bankOld;
 				ccmode = ccmodeOld;
 				MSG_PRINTLN(F("ccmode not valid"));
 			}
@@ -1329,7 +1334,15 @@ void ccRegWrite()	// CW cc register write
 	uint8_t tmp_ccN = 0xFF;
 	uint8_t tmp_ccmode = 0xFF;
 	bool flag = false;
-	
+	bool resetFlag = false;
+    
+	uint8_t CWccreset = EEPROM.read(bankOffset + addr_CWccreset);
+	if ((CWccreset == 0xA5 || CWccreset == 0xA6) &&  cmdstring.charAt(6) == ',') { 
+		cc1101::ccFactoryReset(false);
+		cc1101::CCinit();
+		resetFlag = true;
+	}
+
 	pos = 2;
 	for (i=0; i<64; i++)
 	{
@@ -1346,7 +1359,7 @@ void ccRegWrite()	// CW cc register write
 			if (reg <= 0x28) {
 				reg += 2;
 			}
-			else {	// 0x29 - 0x2F nur fuer Testzwecke
+			else if (reg < 0x2C) {  // 0x29 - 0x2B nur fuer Testzwecke -> kein write ins EEPROM
 				reg = 0x2F;
 			}
 		}
@@ -1396,6 +1409,9 @@ void ccRegWrite()	// CW cc register write
 			ccmode = tmp_ccmode;
 			setCCmode();
 		}
+		if (resetFlag == true) {
+			MSG_PRINT(F(",e"));
+		}
 		MSG_PRINTLN("");
 	} else {
 		MSG_PRINT(F(" Error at pos="));
@@ -1428,7 +1444,7 @@ void cmd_writeEEPROM()	// write EEPROM und CC11001 register
          val = cmdstringPos2int(3);
          if (reg < 0x40) {
            EEPROM.write(bankOffset + reg, val);
-           if (hasCC1101) {
+           if (hasCC1101 && reg <= 0x2A) {  // nur bis cc1101_reg 0x28
              cc1101::writeReg(reg-2, val);
            }
          }
@@ -1520,7 +1536,7 @@ void cmd_ccFactoryReset()
          if (cmdstring.charAt(0) == 'e' && isDigit(cmdstring.charAt(1))) {
             cmd_bank();
          }
-         cc1101::ccFactoryReset();
+         cc1101::ccFactoryReset(true);
          cc1101::CCinit();
          EEPROM.write(bankOffset + addr_ccN, 0);
          ccmode = 0;
@@ -1966,7 +1982,7 @@ void initEEPROM(void)
     //storeFunctions(1, 1, 1);    // Init EEPROM with all flags enabled
     #ifdef CMP_CC1101
        if (EEPROM.read(EE_MAGIC_OFFSET) != VERSION_1) {  // ccFactoryReset nur wenn VERSION_1 nicht passt
-          cc1101::ccFactoryReset();
+          cc1101::ccFactoryReset(true);
        }
     #endif
     EEPROM.write(EE_MAGIC_OFFSET, VERSION_1);
