@@ -4,7 +4,7 @@
 #define _CC1101_h
 
 //#ifdef defined(ARDUINO) && ARDUINO >= 100
-	#include "Arduino.h"
+	#include <Arduino.h>
 //#else
 	//#include "WProgram.h"
 //#endif
@@ -65,8 +65,12 @@ namespace cc1101 {
 	#define CC1101_WRITE_BURST 0x40
 	#define CC1101_READ_BURST  0xC0
 	
+	#define CC1101_IOCFG2      0x00
+	#define CC1101_IOCFG0      0x02
+	#define CC1101_FIFOTHR     0x03
 	#define CC1101_SYNC1       0x04
 	#define CC1101_SYNC0       0x05
+	#define CC1101_PKTLEN      0x06
 	#define CC1101_FREQ2       0x0D  // Frequency control word, high byte
 	#define CC1101_FREQ1       0x0E  // Frequency control word, middle byte
 	#define CC1101_FREQ0       0x0F  // Frequency control word, low byte
@@ -75,6 +79,7 @@ namespace cc1101 {
 	#define CC1101_MDMCFG4     0x10
 	#define CC1101_MDMCFG3     0x11
 	#define CC1101_MDMCFG2     0x12
+	#define CC1101_DEVIATN     0x15
 	
 	// Multi byte memory locations
 	#define CC1101_PATABLE          0x3E  // 8 byte memory
@@ -111,8 +116,22 @@ namespace cc1101 {
 	#define CC1101_SAFC     0x37  // Perform AFC adjustment of the frequency synthesizer
 	#define CC1101_SFRX     0x3A  // Flush the RX FIFO buffer
 	#define CC1101_SFTX     0x3B  // Flush the TX FIFO buffer.
-	#define CC1101_SNOP      0x3D  // No operation. May be used to get access to the chip status byte.
+	#define CC1101_SNOP     0x3D  // No operation. May be used to get access to the chip status byte.
 
+	// Chip Status Byte
+	#define CC1101_STATUS_CHIP_RDYn_BM             0x80
+	#define CC1101_STATUS_STATE_BM                 0x70
+	#define CC1101_STATUS_FIFO_BYTES_AVAILABLE_BM  0x0F
+
+	// Chip states
+	#define CC1101_STATE_IDLE                      0x00
+	#define CC1101_STATE_RX                        0x10
+	#define CC1101_STATE_TX                        0x20
+	#define CC1101_STATE_FSTXON                    0x30
+	#define CC1101_STATE_CALIBRATE                 0x40
+	#define CC1101_STATE_SETTLING                  0x50
+	#define CC1101_STATE_RX_OVERFLOW               0x60
+	#define CC1101_STATE_TX_UNDERFLOW              0x70
 
 /*#ifdef MAPLE_Mini
 	#define wait_Miso() delayMicroseconds(10)
@@ -192,7 +211,8 @@ namespace cc1101 {
 		0x6C, // 1A BSCFG
 		0x07, // 1B AGCCTRL2  03     42 dB instead of 33dB
 		0x00, // 1C AGCCTRL1  40     
-		0x90, // 1D AGCCTRL0  91     4dB decision boundery
+		//0x90, // 1D AGCCTRL0  91   4dB decision boundery
+		0x91, // 1D AGCCTRL0  91     8dB decision boundery
 		0x87, // 1E WOREVT1
 		0x6B, // 1F WOREVT0
 		0xF8, // 20 WORCTRL
@@ -516,7 +536,23 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		return readReg(CC1101_RXBYTES,CC1101_STATUS);  // 
 	}
 	
-	bool readRXFIFO(uint8_t len) {
+	void readRXFIFO(uint8_t* data, uint8_t length, uint8_t *rssi, uint8_t *lqi) {  // WMBus
+		cc1101_Select();
+		sendSPI(CC1101_RXFIFO | CC1101_READ_BURST);    // send register address
+		for (uint8_t i = 0; i < length; i++)
+			data[i] = sendSPI(0);        // read result
+		
+		if (rssi) {
+			*rssi = sendSPI(0);
+			if (lqi) {
+				*lqi =  sendSPI(0);
+			}
+		}
+		cc1101_Deselect();
+	}
+
+	
+	bool readRXFIFOdup(uint8_t len) {
 		bool dup = true;
 		uint8_t rx;
 		
@@ -534,6 +570,16 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		return dup;
 	}
 	
+	void WriteFifo(const uint8_t* data, uint8_t length) {
+		cc1101_Select();
+
+		sendSPI(CC1101_TXFIFO | CC1101_WRITE_BURST);   // send register address
+		for (uint8_t i = 0; i < length; i++)
+			sendSPI(data[i]);
+
+		cc1101_Deselect();
+	}
+
 	void sendFIFO(int8_t start, uint8_t end) {
 		uint8_t val;
 		uint8_t i;
@@ -605,7 +651,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 	uint8_t setTransmitMode()
 	{
 		if (cmdStrobeTo(CC1101_SFTX) == false) {	// flush TX with wait MISO timeout
-			DBG_PRINTLN(F("CC1101: Setting TX failed"));
+			DBG_PRINTLN(F("CC1101: flush TX failed"));
 			return false;
 		}
 		cmdStrobe(CC1101_SIDLE);
