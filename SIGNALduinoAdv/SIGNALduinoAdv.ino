@@ -7,7 +7,7 @@
 *   there is an option to send almost any data over a send raw interface
 *   2014-2015  N.Butzek, S.Butzek
 *   2016 S.Butzek
-*   2020-2021 Ralf9
+*   2020-2022 Ralf9
 *
 *   This software focuses on remote sensors like weather sensors (temperature,
 *   humidity Logilink, TCM, Oregon Scientific, ...), remote controlled power switches
@@ -29,24 +29,24 @@
 *   You should have received a copy of the GNU General Public License
 *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-* Version from: https://github.com/Ralf9/SIGNALDuino/tree/dev-r421_cc1101
+* Version from: https://github.com/Ralf9/SIGNALDuino/tree/dev-r422_cc1101
 
 *------------------------------------------------------------------------------------------
 
-*-----  fuer den MapleMini ist der core 1.9.0 erforderlich, der core 2.0.0 hat noch einen bug in der SerialUSB ------
+*-----  fuer den MapleMini ist der core 1.9.0 erforderlich, der core 2.x.x hat noch einen bug in der SerialUSB ------
 */
 
 #include "compile_config.h"
 #include <Arduino.h>
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.1-dev210711"
+#define PROGVERS               "4.2.2-dev220217"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
 
 	#ifdef MAPLE_SDUINO
-		const uint8_t pinSend[] = {10, 17};
+		const uint8_t pinSend[] = {10, 17, 13};
 		const uint8_t pinReceive[] = {11, 18, 16, 14};
 		#define PIN_LED              33
 		#define PIN_SEND             17   // gdo0 Pin TX out
@@ -54,7 +54,7 @@
 		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
 		#define PIN_WIZ_RST          27
 	#elif MAPLE_CUL
-		const uint8_t pinSend[] = {10, 17};
+		const uint8_t pinSend[] = {10, 17, 13};
 		const uint8_t pinReceive[] = {11, 18, 16, 14};
 		#define PIN_LED              33
 		#define PIN_SEND             17   // gdo0 Pin TX out
@@ -119,6 +119,7 @@
 
 #include "cc1101.h"
 #include "output.h"
+#include "mbus.h"
 #include "bitstore4.h"
 #include "signalDecoder4.h"
 #include "SimpleFIFO.h"
@@ -206,7 +207,7 @@ Callee rssiCallee;
 #define mcMinBitLenDef   17
 #define ccMaxBuf 64
 #define defMaxMsgSize 1500	// selber Wert wie in signalDecoder4.h
-#define maxSendEcho 100
+#define maxSendEcho 100     // siehe auch in der mbus.h
 
 #define radioOokAsk 1
 #define defSelRadio 1	// B
@@ -258,12 +259,13 @@ volatile bool RXenabledSlowRfA = false;
 volatile bool RXenabledSlowRfB = false;
 bool unsuppCmd = false;
 bool CmdOk = false;
+bool FSKdebug = false;
 uint8_t MdebFifoLimitA = 120;
 uint8_t MdebFifoLimitB = 120;
 uint8_t bank = 0;
 uint16_t bankOffset = 0;
 //uint8_t ccN = 0;
-uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 - FIFO LaCrosse, 4 - FIFO LaCrosse, 9 - FIFO mit Debug Ausgaben
+uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 - FIFO LaCrosse, 4 - FIFO LaCrosse, 8 - WMBus, 9 - FIFO mit Debug Ausgaben
 uint8_t radionr = defSelRadio;
 uint8_t radio_bank[4];
 uint8_t ccBuf[4][ccMaxBuf];
@@ -331,6 +333,7 @@ void setHasCC1101(uint8_t val);
   void ethernetLoop();
 #endif
 #ifdef ESP32
+	bool wifiConnected = true;
 	inline void WiFiEvent();
 	void IRAM_ATTR cronjob(void *pArg);
 #else
@@ -447,6 +450,8 @@ bool saveIp(IPAddress IP, uint8_t EE_pos) {
 	return flag;
 }
 
+WiFiManager wifiManager;
+
 #endif
 
 void setup() {
@@ -479,14 +484,8 @@ void setup() {
 	server.begin();		// start listening for clients
 
 #elif defined(ESP32)
-  /*disconnectedEventHandler = WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected & event)
-  {
-    Server.stop();
-    Serial.print("WiFi lost connection. Reason: ");
-    Serial.println(event.reason);
-  });*/
-	
-	/*WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+	WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+		Serial.println("-----WiFi connected------");
 		Server.begin();  // start telnet server
 		Server.setNoDelay(true);
 	}, WiFiEvent_t::SYSTEM_EVENT_STA_CONNECTED);
@@ -495,8 +494,9 @@ void setup() {
 		Server.stop();  // end telnet server
 		Serial.print("WiFi lost connection. Reason: ");
 		Serial.println(info.sta_er_fail_reason);
+		wifiConnected = false;
 	}, WiFiEvent_t::SYSTEM_EVENT_STA_DISCONNECTED);
-	*/
+	
 	blinksos_args.callback = sosBlink;
 	blinksos_args.dispatch_method = ESP_TIMER_TASK;
 	blinksos_args.name = "blinkSOS";
@@ -513,7 +513,7 @@ void setup() {
 
 	Serial.println(F("\nstarted"));
 	
-	WiFiManager wifiManager;
+	//WiFiManager wifiManager;
 	
 	//set config save notify callback
 	wifiManager.setSaveConfigCallback(saveConfigCallback);
@@ -725,6 +725,7 @@ void setup() {
 	pinAsInput(pinReceive[3]);
 	pinAsInput(pinSend[0]);    // gdo0Pin, sicherheitshalber bis zum CC1101 init erstmal input
 	pinAsInput(pinSend[1]);
+	pinAsInput(pinSend[2]);
 	
 	// CC1101
 #ifdef WATCHDOG
@@ -803,6 +804,9 @@ void setup() {
 		if (statRadio < 10) {
 			bankOffset = getBankOffset(statRadio);
 			ccmode = tools::EEbankRead(addr_ccmode);
+			if (ccmode == 8) {
+				mbus_init(tools::EEbankRead(addr_ccN));
+			}
 			if (radionr > 1 || ccmode > 0 || cc1101::regCheck()) {
 				if (tools::EEread(addr_rxRes) != 0xA5) {	// wenn A5 dann bleibt rx=0
 					en_dis_receiver(true);
@@ -934,6 +938,14 @@ void loop() {
 	ethernetLoop();
 #endif
 #ifdef ESP32
+	if (wifiConnected == false) {
+		while (WiFi.status() != WL_CONNECTED) {
+			yield();
+		}
+		wifiConnected = true;
+		Serial.println("*******Connected*****");
+		Server.begin();    // start listening for clients
+	}
 	serialEvent();
 	WiFiEvent();
 #endif
@@ -1003,8 +1015,15 @@ void loop() {
 		}
 	}
   }
+  else if (ccmode == 8) {
+	if (RXenabled[radionr] == true) {
+		mbus_task(bankoff + addr_ccN);
+	}
+  }
   else if (ccmode < 15) {
-	getRxFifo(bankoff);
+	if (RXenabled[radionr] == true) {
+		getRxFifo(bankoff);
+	}
   }
  }
  radionr = remRadionr;
@@ -1045,7 +1064,7 @@ void getRxFifo(uint16_t Boffs) {
 				if (fifoBytes > ccMaxBuf) {
 					fifoBytes = ccMaxBuf;
 				}
-				dup = cc1101::readRXFIFO(fifoBytes);
+				dup = cc1101::readRXFIFOdup(fifoBytes);
 				if (ccmode != 2 || dup == false) {
 					if (ccmode != 9) {
 						MSG_PRINT(MSG_START);
@@ -1608,6 +1627,11 @@ void send_ccFIFO()
 		}
 		startdata += 3;
 		
+		if (cmdstring.charAt(startdata) == 'b') {
+			mbus_send(startdata);
+			return;
+		}
+		
 		/*MSG_PRINT(F("repeats="));
 		MSG_PRINT(repeats);
 		MSG_PRINT(F(" N="));
@@ -1792,6 +1816,9 @@ void cmd_bank()
 			if (cmdstring.charAt(0) != 'e') {
 				print_Bank();
 				if (hasCC1101) cc1101::CCinit();
+				if (ccmode == 8) {
+					mbus_init(tools::EEbankRead(addr_ccN));
+				}
 				setCCmode();
 			}
 		}
@@ -2164,12 +2191,21 @@ void cmd_uptime()	// t: Uptime
 //--------------------------------------------------------------------------------
 void cmd_test()
 {
+	if (cmdstring.charAt(1) == 'd') {
+		FSKdebug = false;
+	}
+	else if (cmdstring.charAt(1) == 'D') {
+		FSKdebug = true;
+	}
+	else {
 	#ifdef ARDUINO
-	   MSG_PRINT("a=");
-     MSG_PRINTLN(ARDUINO);
-	#else
-	   unsuppCmd = true;
-  #endif
+		MSG_PRINT(F("a="));
+		MSG_PRINT(ARDUINO);
+		MSG_PRINT(F(" "));
+	#endif
+	}
+	MSG_PRINT(F("FSKdebug="));
+	MSG_PRINTLN(FSKdebug);
 }
 
 //--------------------------------------------------------------------------------
@@ -2190,10 +2226,10 @@ void ccRegWrite()	// CW cc register write
 			break;
 		}
 		reg = tools::cmdstringPos2int(pos);
+		val = tools::cmdstringPos2int(pos+2);
 		if (reg > 0x47) {
 			break;
 		}
-		val = tools::cmdstringPos2int(pos+2);
 		if (reg <= 0x2F) {
 			cc1101::writeReg(reg,val);
 			if (reg <= 0x28) {
@@ -2235,6 +2271,7 @@ void ccRegWrite()	// CW cc register write
 	}
 	tools::EEstore();
 	MSG_PRINT(cmdstring); // echo
+
 	if (flag) {
 		MSG_PRINT(F(" ok"));
 		if (tmp_ccN != 0xFF) {
@@ -2248,6 +2285,9 @@ void ccRegWrite()	// CW cc register write
 			MSG_PRINT(F(",ccmode="));
 			MSG_PRINT(tmp_ccmode);
 			ccmode = tmp_ccmode;
+			if (ccmode == 8) {
+				mbus_init(tmp_ccN);
+			}
 			setCCmode();
 		}
 		MSG_PRINTLN("");
@@ -2850,11 +2890,13 @@ inline void WiFiEvent()
       if (client) client.stop();
       client = Server.available();
       client.flush();
-      //DBG_PRINTLN("New client: ");
-      //DBG_PRINTLN(client.remoteIP());
+      Serial.print(F("New client: "));
+      Serial.println(client.remoteIP());
     } else {
       WiFiClient rejectClient = Server.available();
       rejectClient.stop();
+      Serial.print(F("Reject new Client="));
+      Serial.println(rejectClient.remoteIP());
       //DBG_PRINTLN("Reject new Client: ");
       //DBG_PRINTLN(rejectClient.remoteIP());
     }

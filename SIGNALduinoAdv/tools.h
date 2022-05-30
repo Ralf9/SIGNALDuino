@@ -27,7 +27,7 @@ namespace tools {
 		// printf ("%d\n",$hex) ??
 	}
 	
-	uint8_t cmdstringPos2int(uint8_t pos) {
+	uint8_t cmdstringPos2int(uint16_t pos) {
 		uint8_t val;
 		uint8_t hex;
 
