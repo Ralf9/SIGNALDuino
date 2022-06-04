@@ -33,14 +33,14 @@
 
 *------------------------------------------------------------------------------------------
 
-*-----  fuer den MapleMini ist der core 1.9.0 erforderlich, der core 2.x.x hat noch einen bug in der SerialUSB ------
+*-----  fuer den MapleMini ist bei der Serial und USB Version der core 1.9.0 erforderlich, der core 2.x.x hat noch einen bug in der SerialUSB ------
 */
 
 #include "compile_config.h"
 #include <Arduino.h>
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.2-dev220217"
+#define PROGVERS               "4.2.2-dev220604"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -205,7 +205,7 @@ Callee rssiCallee;
 #define maxCmdString 600
 #define maxSendPattern 10
 #define mcMinBitLenDef   17
-#define ccMaxBuf 64
+//#define ccMaxBuf 64
 #define defMaxMsgSize 1500	// selber Wert wie in signalDecoder4.h
 #define maxSendEcho 100     // siehe auch in der mbus.h
 
@@ -268,7 +268,7 @@ uint16_t bankOffset = 0;
 uint8_t ccmode = 0;		// cc1101 Mode: 0 - normal, 1 - FIFO, 2 - FIFO ohne dup, 3 - FIFO LaCrosse, 4 - FIFO LaCrosse, 8 - WMBus, 9 - FIFO mit Debug Ausgaben
 uint8_t radionr = defSelRadio;
 uint8_t radio_bank[4];
-uint8_t ccBuf[4][ccMaxBuf];
+uint8_t ccBuf[4][ccMaxBuf+2];
 
 #if !defined(LAN_WIZ) && !defined(ESP32)
   bool unsuppCmdEnable;
@@ -1050,7 +1050,14 @@ void getRxFifo(uint16_t Boffs) {
 		fifoBytes = cc1101::getRXBYTES(); // & 0x7f; // read len, transfer RX fifo
 		if (fifoBytes > 0) {
 			uint8_t marcstate;
-			uint8_t RSSI = cc1101::getRSSI();
+			bool appendRSSI = false;
+			uint8_t RSSI;
+			if ((tools::EEread(Boffs + 2 +CC1101_PKTCTRL1) & 4) == 4) {
+				appendRSSI = true;
+			}
+			else {
+				RSSI = cc1101::getRSSI();
+			}
 			
 			if (ccmode == 9) {
 				if (fifoBytes > 1 && fifoBytes < 0x80) {
@@ -1064,7 +1071,7 @@ void getRxFifo(uint16_t Boffs) {
 				if (fifoBytes > ccMaxBuf) {
 					fifoBytes = ccMaxBuf;
 				}
-				dup = cc1101::readRXFIFOdup(fifoBytes);
+				dup = cc1101::readRXFIFOdup(fifoBytes, ccmode, appendRSSI);
 				if (ccmode != 2 || dup == false) {
 					if (ccmode != 9) {
 						MSG_PRINT(MSG_START);
@@ -1085,8 +1092,13 @@ void getRxFifo(uint16_t Boffs) {
 							MSG_PRINT(F(";N="));
 							MSG_PRINT(n);
 						}
-						MSG_PRINT(F(";R="));
-						MSG_PRINT(RSSI);
+						if (appendRSSI == true) {
+							MSG_PRINT(F(";r"));
+						}
+						else {
+							MSG_PRINT(F(";R="));
+							MSG_PRINT(RSSI);
+						}
 						MSG_PRINT(F(";"));
 						MSG_PRINT(MSG_END);
 						MSG_PRINT("\n");
@@ -1116,6 +1128,9 @@ void getRxFifo(uint16_t Boffs) {
 					if (cc1101::flushrx()) {		// Flush the RX FIFO buffer
 						cc1101::setReceiveMode();
 					}
+				}
+				else if (marcstate != 13 && ccmode < 3) {  // marcstate 13 ist rx
+					cc1101::setReceiveMode();
 				}
 			}
 		}
@@ -1652,8 +1667,15 @@ void send_ccFIFO()
 			}
 			MSG_PRINT(cmdstring); // echo
 			MSG_PRINT(F("Marcs="));
-			MSG_PRINTLN(cc1101::getMARCSTATE());
-			enableReceive();
+			uint8_t marcstate = cc1101::getMARCSTATE();
+			MSG_PRINTLN(marcstate);  // 13 - rx
+			if (marcstate != 13 && RXenabled[radionr] == true) {
+				if (marcstate != 1) {          // not idle
+					cc1101::ccStrobe_SIDLE();  // goto Idle mode
+					delay(1);
+				}
+				cc1101::setReceiveMode();
+			}
 		}
 		else {
 			startdata = -1;
@@ -1796,6 +1818,25 @@ void cmd_bank()
 			if (remRadionr == 255) {	// Abbruch
 				return;
 			}
+		}
+		else if (cmdstring.charAt(2) == '-' && bank > 0 && bank != remBank) {  // Bank deaktivieren (ungueltig)
+			for (uint8_t i = 0; i < 4; i++) {
+				if ((radio_bank[i] & 0x0F) == bank) {  // testen ob Bank nicht aktiv ist
+					posDigit = 255;
+					break;
+				}
+			}
+			if (posDigit != 255) {
+				uint16_t tmpBankOffset = getBankOffset(bank);
+				tools::EEwrite(tmpBankOffset, 255);
+				tools::EEwrite(tmpBankOffset+1, 255);
+				tools::EEstore();
+				MSG_PRINT(F("Bank "));
+				MSG_PRINT(bank);
+				MSG_PRINTLN(F(" clear"));
+			}
+			bank = remBank;
+			return;
 		}
 		radio_bank[radionr] = bank;
 		bankOffset = getBankOffset(bank);
@@ -2218,7 +2259,15 @@ void ccRegWrite()	// CW cc register write
 	uint8_t tmp_ccN = 0xFF;
 	uint8_t tmp_ccmode = 0xFF;
 	bool flag = false;
-	
+	bool resetFlag = false;
+
+	uint8_t CWccreset = tools::EEbankRead(addr_CWccreset);
+	if ((CWccreset == 0xA5 || CWccreset == 0xA6) &&  cmdstring.charAt(6) == ',') { 
+		cc1101::ccFactoryReset(false);
+		cc1101::CCinit();
+		resetFlag = true;
+	}
+
 	pos = 2;
 	for (i=0; i<64; i++)
 	{
@@ -2235,7 +2284,7 @@ void ccRegWrite()	// CW cc register write
 			if (reg <= 0x28) {
 				reg += 2;
 			}
-			else {	// 0x29 - 0x2F nur fuer Testzwecke
+			else if (reg < 0x2C) {  // 0x29 - 0x2B nur fuer Testzwecke -> kein write ins EEPROM
 				reg = 0x2F;
 			}
 		}
@@ -2289,6 +2338,9 @@ void ccRegWrite()	// CW cc register write
 				mbus_init(tmp_ccN);
 			}
 			setCCmode();
+		}
+		if (resetFlag == true) {
+			MSG_PRINT(F(",e"));
 		}
 		MSG_PRINTLN("");
 	} else {
@@ -2347,10 +2399,8 @@ void cmd_writeEEPROM()	// write EEPROM und CC11001 register
          val = tools::cmdstringPos2int(3);
          if (reg < 0x40) {
            tools::EEbankWrite(reg, val);
-           if (reg > 1 && reg < 0x30) {
-             if (hasCC1101) {
-               cc1101::writeReg(reg-2, val);
-             }
+           if (hasCC1101 && reg > 1 && reg <= 0x2A) {  // nur bis cc1101_reg 0x28
+              cc1101::writeReg(reg-2, val);
            }
          }
          else {   // ab 0x40 immer in Bank 0
@@ -2497,7 +2547,7 @@ void cmd_ccFactoryReset()	// e<0-9>
             cmd_bank();
          }
          if (hasCC1101) {
-            cc1101::ccFactoryReset();
+            cc1101::ccFactoryReset(true);
             cc1101::CCinit();
          }
          tools::EEbankWrite(addr_ccN, 0);
@@ -3338,7 +3388,7 @@ void initEEPROM(void)
     initEEPROMconfig();
     #ifdef CMP_CC1101
        if (tools::EEread(EE_MAGIC_OFFSET) != VERSION_1) {  // ccFactoryReset nur wenn VERSION_1 nicht passt
-          cc1101::ccFactoryReset();	// nur Bank 0
+          cc1101::ccFactoryReset(true);	// nur Bank 0
        }
     #endif
     tools::EEwrite(EE_MAGIC_OFFSET, VERSION_1);
