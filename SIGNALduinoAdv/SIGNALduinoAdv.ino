@@ -40,7 +40,7 @@
 #include <Arduino.h>
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.2-dev220604"
+#define PROGVERS               "4.2.2-dev220620"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -1839,8 +1839,39 @@ void cmd_bank()
 			return;
 		}
 		radio_bank[radionr] = bank;
+		uint16_t bankOffsetOld = bankOffset;
 		bankOffset = getBankOffset(bank);
 		if (bank == 0 || cmdstring.charAt(0) == 'e' || (tools::EEbankRead(0) == bank && tools::EEbankRead(1) == (255 - bank))) {
+		  if (cmdstring.charAt(posDigit+1) == 'f') {
+			uint8_t ccmodeOld = ccmode;
+			ccmode = tools::EEbankRead(addr_ccmode);
+			if (ccmodeOld > 0 && ccmodeOld < 5 && ccmode > 0 && ccmode < 5) {
+				cc1101::ccStrobe_SIDLE();	// Idle mode
+				uint8_t val;
+				uint8_t n = 0;
+				for (uint8_t i = 0; i <= 0x28; i++) {
+					val = tools::EEbankRead(2 + i);
+					if (val != tools::EEread(bankOffsetOld + 2 + i)) {
+						n++;
+						cc1101::writeReg(i,val);
+					}
+				}
+				cc1101::flushrx();
+				cc1101::setReceiveMode();
+				MSG_PRINT("fn=");
+				MSG_PRINT(n);
+				MSG_PRINT(" ");
+				print_Bank();
+			}
+			else {
+				bankOffset = bankOffsetOld;
+				bank = remBank;
+   				radio_bank[radionr] = bank;
+				ccmode = ccmodeOld;
+				MSG_PRINTLN(F("ccmode not valid (must 1-4)"));
+			}
+		  }
+		  else {
 			if (cmdstring.charAt(posDigit+1) == 'W') {
 				tools::EEwrite(addr_statRadio+radionr, bank);
 				tools::EEstore();
@@ -1862,6 +1893,7 @@ void cmd_bank()
 				}
 				setCCmode();
 			}
+		  }
 		}
 		else {
 			MSG_PRINT(F("The bank "));
@@ -2599,6 +2631,8 @@ inline void getConfig()
   else {
     MSG_PRINT(F("ccmode="));
     MSG_PRINT(ccmode);
+    MSG_PRINT(F(" b="));
+    MSG_PRINT(bank);
   }
    if (LEDenabled == false) {
       MSG_PRINT(F(";LED=0"));
@@ -2855,7 +2889,7 @@ uint8_t radioDetekt(bool confmode, uint8_t Dstat)
 		printHex2(ver);
 		if (pn == 0 && ver > 0 && ver < 0xFF) {
 			MSG_PRINTLN("");
-			if (confmode) {
+			if (confmode || (Dstat & 0x0F) == 0x0F) {
 				Dstat = 0x1F;	// 'i'
 			}
 			else {
