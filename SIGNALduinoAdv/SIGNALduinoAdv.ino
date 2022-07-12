@@ -40,7 +40,7 @@
 #include <Arduino.h>
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.2-dev220620"
+#define PROGVERS               "4.2.2-dev220710"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -485,17 +485,34 @@ void setup() {
 
 #elif defined(ESP32)
 	WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
-		Serial.println("-----WiFi connected------");
+		Serial.println(F("-----WiFi connected------"));
 		Server.begin();  // start telnet server
 		Server.setNoDelay(true);
+  #if ESP_IDF_VERSION_MAJOR < 4
 	}, WiFiEvent_t::SYSTEM_EVENT_STA_CONNECTED);
-	
+  #else
+    }, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_CONNECTED);
+  #endif	
 	WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
 		Server.stop();  // end telnet server
-		Serial.print("WiFi lost connection. Reason: ");
-		Serial.println(info.sta_er_fail_reason);
+		Serial.print(F("WiFi lost connection. Reason: "));
+	  #if ESP_IDF_VERSION_MAJOR < 4
+		Serial.println(info.disconnected.reason);
+		if (info.disconnected.reason == 4) {
+	  #else
+        Serial.println(info.wifi_sta_disconnected.reason);
+		if (info.wifi_sta_disconnected.reason == 4) {
+	  #endif
+			Serial.println(F("-----WiFi try reconnect------"));
+			WiFi.disconnect();
+			WiFi.begin();
+		}
 		wifiConnected = false;
+  #if ESP_IDF_VERSION_MAJOR < 4
 	}, WiFiEvent_t::SYSTEM_EVENT_STA_DISCONNECTED);
+  #else
+    }, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+  #endif
 	
 	blinksos_args.callback = sosBlink;
 	blinksos_args.dispatch_method = ESP_TIMER_TASK;
