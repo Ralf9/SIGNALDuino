@@ -40,7 +40,7 @@
 #include <Arduino.h>
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.2-dev220710"
+#define PROGVERS               "4.2.2-dev220712"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -1855,20 +1855,23 @@ void cmd_bank()
 			bank = remBank;
 			return;
 		}
+		uint8_t bankOld_radio = radio_bank[radionr];
 		radio_bank[radionr] = bank;
 		uint16_t bankOffsetOld = bankOffset;
 		bankOffset = getBankOffset(bank);
 		if (bank == 0 || cmdstring.charAt(0) == 'e' || (tools::EEbankRead(0) == bank && tools::EEbankRead(1) == (255 - bank))) {
 		  if (cmdstring.charAt(posDigit+1) == 'f') {
 			uint8_t ccmodeOld = ccmode;
+			uint16_t bankOffsetOld_radio = getBankOffset(bankOld_radio);
+			uint8_t ccmodeOld_radio = tools::EEread(bankOffsetOld_radio + addr_ccmode);
 			ccmode = tools::EEbankRead(addr_ccmode);
-			if (ccmodeOld > 0 && ccmodeOld < 5 && ccmode > 0 && ccmode < 5) {
+			if (ccmodeOld_radio > 0 && ccmodeOld_radio < 5 && ccmode > 0 && ccmode < 5) {
 				cc1101::ccStrobe_SIDLE();	// Idle mode
 				uint8_t val;
 				uint8_t n = 0;
 				for (uint8_t i = 0; i <= 0x28; i++) {
 					val = tools::EEbankRead(2 + i);
-					if (val != tools::EEread(bankOffsetOld + 2 + i)) {
+					if (val != tools::EEread(bankOffsetOld_radio + 2 + i)) {
 						n++;
 						cc1101::writeReg(i,val);
 					}
@@ -1883,7 +1886,10 @@ void cmd_bank()
 			else {
 				bankOffset = bankOffsetOld;
 				bank = remBank;
-   				radio_bank[radionr] = bank;
+   				radio_bank[radionr] = bankOld_radio;
+				if (remRadionr != 255) {
+					radionr = remRadionr;
+				}
 				ccmode = ccmodeOld;
 				MSG_PRINTLN(F("ccmode not valid (must 1-4)"));
 			}
@@ -2291,6 +2297,23 @@ void cmd_test()
 	#ifdef ARDUINO
 		MSG_PRINT(F("a="));
 		MSG_PRINT(ARDUINO);
+		MSG_PRINT(F(" "));
+	#endif
+	#ifdef STM32_CORE_VERSION_MAJOR
+		MSG_PRINT(F("STM32coreVer="));
+		MSG_PRINT(STM32_CORE_VERSION_MAJOR);
+		MSG_PRINT(F("."));
+		MSG_PRINT(STM32_CORE_VERSION_MINOR);
+		MSG_PRINT(F("."));
+		MSG_PRINT(STM32_CORE_VERSION_PATCH);
+		MSG_PRINT(F(" "));
+	#elif ESP_IDF_VERSION_MAJOR
+		MSG_PRINT(F("ESP_IDF_VER="));
+		MSG_PRINT(ESP_IDF_VERSION_MAJOR);
+		MSG_PRINT(F("."));
+		MSG_PRINT(ESP_IDF_VERSION_MINOR);
+		MSG_PRINT(F("."));
+		MSG_PRINT(ESP_IDF_VERSION_PATCH);
 		MSG_PRINT(F(" "));
 	#endif
 	}
