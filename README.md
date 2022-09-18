@@ -7,7 +7,10 @@ System to receive digital signals and provide them to other systems pro demodula
 Firmware files  are in https://github.com/Ralf9/SIGNALDuino/releases
 
 Compile it or use the and have fun.  
-- If you are using the Arduino IDE, you have to copy the folder "SIGNALduinoAdv" with its contents into your sketch folder.  
+- If you are using the Arduino IDE, you have to copy the folder "SIGNALduinoAdv" with its contents into your sketch folder and edit the file compile_config.h 
+ - If you use LAN, you need the Ethernet Library
+ - If you use the ESP32, you need the WifiManager by tablatronix/tzapu
+The ESP32 board version 1.06 is the last version with the ESP-IDF v3.3.x, there may be WiFi problems with the ESP-IDF v4.4
 - If you are using platformio, you have to copy the files "extra_script.py", "platformio.ini" and the folder "SIGNALduinoAdv" with its contents into your project folder. 
 
 ### Using SIGNALDuino in FHEM
