@@ -11,7 +11,9 @@
 
 //#define LAN_WIZ 1        // nur fuer MAPLE_SDUINO mit USR-ES1 W5500
 #define LAN_INIT_DHCP 1  // damit wird bei der ersten Inbetriebnahme DHCP verwendet
-//#define MAPLE_WATCHDOG 1
+#ifndef ESP32
+  //#define MAPLE_WATCHDOG 1
+#endif
 
 //#define DEBUG_BackupReg 1
 //#define DEBUG_SERIAL 2	// debug level
