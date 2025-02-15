@@ -47,7 +47,7 @@ namespace cc1101 {
 	#define misoPin 19   // MISO in
 	#define sckPin  18   // SCLK out
 	#ifdef SIGNALESP32
-		const uint8_t radioCsPin[] = {27, 5, 22, 33};
+		const uint8_t radioCsPin[] = {27, 5, 17, 32};
 	#elif defined(EVIL_CROW_RF)
 		const uint8_t radioCsPin[] = {5, 27, 22, 33};
 	#else  // ESP32_SDUINO_TEST
@@ -84,7 +84,10 @@ namespace cc1101 {
 	#define CC1101_MDMCFG3     0x11
 	#define CC1101_MDMCFG2     0x12
 	#define CC1101_DEVIATN     0x15
+	#define CC1100_FSCAL1      0x25  // Frequency synthesizer calibration
 	#define CC1101_TEST2       0x2C
+	#define CC1101_TEST1       0x2D
+	#define CC1101_TEST0       0x2E
 	
 	// Multi byte memory locations
 	#define CC1101_PATABLE          0x3E  // 8 byte memory
@@ -448,10 +451,13 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 
 	void ccFactoryReset(bool flag) {
 		for (uint8_t i = 0; i<sizeof(initVal); i++) {
-        	tools::EEbankWrite(EE_CC1101_CFG + i, pgm_read_byte(&initVal[i]));
+			tools::EEbankWrite(EE_CC1101_CFG + i, pgm_read_byte(&initVal[i]));
 		}
 		tools::EEbankWrite(addr_CWccreset, 0xFF);
 		if (flag == false) {
+			#if defined(MAPLE_Mini) || defined(ESP32)
+			tools::EEstore();
+			#endif
 			return;
 		}
 		for (uint8_t i = 0; i < 8; i++) {
@@ -619,7 +625,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		for(i=0; i< 200;++i) 
 		{
 			if( readReg(CC1101_MARCSTATE, CC1101_STATUS) != MARCSTATE_TX)
-				break; //neither in RX nor TX, probably some error
+				break;
 			delay(1);
 		}
 		//MSG_PRINT(F("wtx="));
@@ -668,13 +674,18 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		if (maxloop == 0 )		DBG_PRINTLN(F("CC1101: Setting RX failed"));
 
 	}
-
-	uint8_t setTransmitMode()
+	
+	uint8_t flushTX()
 	{
 		if (cmdStrobeTo(CC1101_SFTX) == false) {	// flush TX with wait MISO timeout
 			DBG_PRINTLN(F("CC1101: flush TX failed"));
 			return false;
 		}
+		return true;
+	}
+
+	uint8_t setTransmitMode()
+	{
 		cmdStrobe(CC1101_SIDLE);
 		uint8_t maxloop = 0xff;
 		while (maxloop-- && (cmdStrobe(CC1101_STX) & CC1101_STATUS_STATE_BM) != CC1101_STATE_TX)  // TX enable
@@ -706,6 +717,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		if (waitTo_Miso() == 0) {  // wait with timeout until MISO goes low
 			return false;            // timeout
 		}
+		//delayMicroseconds(100);
 		cc1101_Deselect();
 		
 		delay(1);
@@ -723,8 +735,15 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		delayMicroseconds(10);            // ### todo: welcher Wert ist als delay sinnvoll? ###
 
 		if (tools::EEbankRead(addr_CWccreset) == 0xA5 && ((tools::EEbankRead(addr_CWccTEST) & 0xF0) == 0x60)) {
-			for (uint8_t i = 0; i<3; i++) {
-				writeReg(CC1101_TEST2 + i, tools::EEbankRead(CC1101_TEST2 + i));
+			uint8_t CWccTEST = tools::EEbankRead(addr_CWccTEST);
+			if ((CWccTEST & 0x01) == 1) {
+				writeReg(CC1101_TEST0, tools::EEbankRead(CC1101_TEST0));
+			}
+			if ((CWccTEST & 0x02) == 2) {
+				writeReg(CC1101_TEST1, tools::EEbankRead(CC1101_TEST1));
+			}
+			if ((CWccTEST & 0x04) == 4) {
+				writeReg(CC1101_TEST2, tools::EEbankRead(CC1101_TEST2));
 			}
 		}
 		writePatable();                                 // write PatableArray to patable reg
