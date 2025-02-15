@@ -40,7 +40,7 @@
 #include <Arduino.h>
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.3-dev241121"
+#define PROGVERS               "4.2.3-dev241231"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -235,7 +235,7 @@ Callee rssiCallee;
 #define addr_selRadio        0xE4    // alt EF
 #define addr_res_e5          0xE5 // reserve
 #define addr_res_e6          0xE6 // reserve
-#define addr_res_e7          0xE7 // reserve
+#define addr_PLL_test        0xE7    // PLL lock test
 #define addr_ConnectTimeout  0xE8    // wifiManager.setConnectTimeout in Minuten (nur bei ESP32)
 #define addr_rxRes           0xE9    // bei 0xA5 ist rx nach dem Reset disabled
 // CSetAddr[] res ea - fd, alt f0 - fc, 14.01.21
@@ -270,6 +270,7 @@ volatile bool RXenabledSlowRfB = false;
 bool unsuppCmd = false;
 bool CmdOk = false;
 bool FSKdebug = false;
+uint8_t PLL_Lock_test = 0;
 uint8_t MdebFifoLimitA = 120;
 uint8_t MdebFifoLimitB = 120;
 uint8_t bank = 0;
@@ -1198,9 +1199,25 @@ void getRxFifo(uint16_t Boffs) {
 							MSG_PRINT(F(";R="));
 							MSG_PRINT(RSSI);
 						}
+						/*if (FSKdebug) {
+							marcstate = cc1101::getMARCSTATE();
+							fifoBytes = cc1101::getRXBYTES();
+							MSG_PRINT(F(";m="));
+							MSG_PRINT(marcstate);
+							MSG_PRINT(F(";b="));
+							MSG_PRINT(fifoBytes);
+						}*/
 						MSG_PRINT(F(";"));
 						MSG_PRINT(MSG_END);
 						MSG_PRINT("\n");
+						/*if (FSKdebug && (marcstate != 1 || fifoBytes > 0)) {
+							MSG_PRINT(F("FSK_ERR_r="));
+							MSG_PRINT(radionr);
+							MSG_PRINT(F("_m="));
+							MSG_PRINT(marcstate);
+							MSG_PRINT(F("_b="));
+							MSG_PRINTLN(fifoBytes);
+						}*/
 					  #ifdef ESP32
 					  }
 					  #endif
@@ -1233,6 +1250,28 @@ void getRxFifo(uint16_t Boffs) {
 				}
 				else if (marcstate != 13 && ccmode < 3) {  // marcstate 13 ist rx
 					cc1101::setReceiveMode();
+					if (PLL_Lock_test > 0) {
+						if (cc1101::readReg(CC1100_FSCAL1, CC1101_CONFIG) == 0x3f) {
+							if ((PLL_Lock_test & (1 << radionr)) == 0) {
+								MSG_PRINT(F("PLL0_r="));
+								MSG_PRINTLN(radionr);
+							}
+							else {
+								cc1101::ccStrobe_SIDLE();    // Idle mode
+								MSG_PRINT(F("PLL0_R="));
+								MSG_PRINTLN(radionr);
+								cc1101::setReceiveMode(); 
+								if (cc1101::readReg(CC1100_FSCAL1, CC1101_CONFIG) == 0x3f) {
+									cc1101::ccStrobe_SIDLE();    // Idle mode
+									MSG_PRINTLN(F("PLL1!"));
+									cc1101::setReceiveMode();
+									if (cc1101::readReg(CC1100_FSCAL1, CC1101_CONFIG) == 0x3f) {
+										MSG_PRINTLN(F("PLL2!"));
+									}
+								}
+							}
+						}
+					}
 				}
 			}
 			if (ccmode == 7) {  // max
@@ -2043,8 +2082,9 @@ void cmd_bank()
 		else {
 			MSG_PRINT(F("The bank "));
 			MSG_PRINT(bank);
-			MSG_PRINT(F(" was not complete initialized, therefore the bank and radio is reseted to sduino defaults (raw e). "));
+			MSG_PRINT(F(" was not complete initialized, therefore the bank and radio is reseted to sduino defaults (raw e). Disable receive "));
 			cmd_ccFactoryReset();
+            disableReceive(false);
 		}
 	}
 	else if (posDigit == 2) {		// es wurde ein Radio angegeben und keine bank angegeben -> das angegebene radio wird das aktuelle
@@ -2329,7 +2369,12 @@ void cmd_Version()	// V: Version
 		statRadio = radio_bank[i];
 		if (statRadio != 0xFF) {
 			MSG_PRINT(F(" "));
-			MSG_WRITE(i + 'A');
+			if (RXenabled[i] == true) {
+				MSG_WRITE(i + 'A');
+			}
+			else {
+				MSG_WRITE(i + 'a');
+			}
 			if (statRadio & 0x40) {	// Bit6 = 1  Init failed
 				MSG_PRINT(F("-"));
 			}
@@ -2409,7 +2454,10 @@ void cmd_uptime()	// t: Uptime
 //--------------------------------------------------------------------------------
 void cmd_test()
 {
-	uint16_t val;
+	uint16_t val16;
+	uint8_t val;
+	uint8_t radio_nr;
+	char cmdc;
     
 	if (cmdstring.charAt(1) == 'd') {
 		FSKdebug = false;
@@ -2417,12 +2465,32 @@ void cmd_test()
 	else if (cmdstring.charAt(1) == 'D') {
 		FSKdebug = true;
 	}
+	if (cmdstring.charAt(1) == 'L') {
+		cmdc = cmdstring.charAt(2);
+		if (cmdc >= 'A' && cmdc <= 'D') {
+			radio_nr = (uint8_t)cmdc - 65;
+			PLL_Lock_test = bitSet(PLL_Lock_test, radio_nr);
+		}
+		else if (cmdc >= 'a' && cmdc <= 'd') {
+			radio_nr = (uint8_t)cmdc - 97;
+			PLL_Lock_test &= 0x0f;
+			PLL_Lock_test = bitClear(PLL_Lock_test, radio_nr);
+		}
+		else if (cmdc == '0') {
+			PLL_Lock_test = 0;
+		}
+		else {
+			PLL_Lock_test = 0x10;
+		}
+		tools::EEwrite(addr_PLL_test, PLL_Lock_test);
+		tools::EEstore();
+	}
 	#ifdef ESP32
 	else if (cmdstring.charAt(1) == 'T') {
-		val = cmdstring.substring(2).toInt();
-		if (val < 255) {
-			ConnectTimeout = val * 60;
-			tools::EEwrite(addr_ConnectTimeout, val);
+		val16 = cmdstring.substring(2).toInt();
+		if (val16 < 255) {
+			ConnectTimeout = val16 * 60;
+			tools::EEwrite(addr_ConnectTimeout, val16(uint8_t));
 			tools::EEstore();
 		}
 	}
@@ -2459,7 +2527,23 @@ void cmd_test()
 	MSG_PRINT(F(" "));
 	#endif
 	MSG_PRINT(F("FSKdebug="));
-	MSG_PRINTLN(FSKdebug);
+	MSG_PRINT(FSKdebug);
+	if (PLL_Lock_test > 0) {
+		MSG_PRINT(F(" PLL_Lock_test="));
+		if (PLL_Lock_test == 0x10) {
+			MSG_PRINT(F("only print"));
+		}
+		else {
+			//MSG_PRINT(PLL_Lock_test);
+			//MSG_PRINT(F(" "));
+			for (radio_nr=0; radio_nr<4; radio_nr++) {
+				if (bitRead(PLL_Lock_test, radio_nr) == 1) {
+					MSG_WRITE('A' + radio_nr);
+				}
+			}
+		}
+	}
+	MSG_PRINTLN("");
 }
 
 //--------------------------------------------------------------------------------
@@ -3460,6 +3544,13 @@ void callGetFunctions(void)
 	getFunctions(true, &musterDecA.MSenabled, &musterDecA.MUenabled, &musterDecA.MCenabled, &musterDecA.MredEnabled, &musterDecA.MdebEnabled, &LEDenabled, &musterDecA.MSeqEnabled);
 	getFunctions(false,&musterDecB.MSenabled, &musterDecB.MUenabled, &musterDecB.MCenabled, &musterDecB.MredEnabled, &musterDecB.MdebEnabled, &LEDenabled, &musterDecB.MSeqEnabled);
 	getCSvar();
+	PLL_Lock_test = tools::EEread(addr_PLL_test);
+	if (PLL_Lock_test > 15) {
+		PLL_Lock_test = 0;
+	}
+	if (tools::EEread(addr_max_magic0) == max_magic0 && tools::EEread(addr_max_magic1) == max_magic1) {
+		moritz::moritz_read_AutoAckAddr();
+	}
 }
 
 //--------------------------------------------------------------------------------
@@ -3633,6 +3724,7 @@ void initEEPROMconfig(void)
 	for (uint8_t i = 0; i < CSetAnzEE; i++) {
 		tools::EEwrite(CSetAddr[i], CSetDef[i]);
 	}
+	tools::EEwrite(addr_max_magic0, 0);
 	tools::EEwrite(addr_statRadio, defStatRadio);	// A
 	tools::EEwrite(addr_statRadio+1, 0);    // Bank 0  B
 	tools::EEwrite(addr_statRadio+2, defStatRadio); // C
@@ -3644,7 +3736,7 @@ void initEEPROMconfig(void)
 	tools::EEwrite(addr_selRadio, defSelRadio);
 	tools::EEwrite(addr_res_e5, 0xFF); // reserve
 	tools::EEwrite(addr_res_e6, 0xFF);
-	tools::EEwrite(addr_res_e7, 0xFF);
+	tools::EEwrite(addr_PLL_test, 0);
 	tools::EEwrite(addr_ConnectTimeout, 0);
 	tools::EEwrite(addr_rxRes, 0xFF);
 	tools::EEstore();
@@ -3674,9 +3766,6 @@ void initEEPROM(void)
     tools::EEstore();
   }
   callGetFunctions();
-  if (tools::EEread(addr_max_magic0) == max_magic0 && tools::EEread(addr_max_magic1) == max_magic1) {
-    moritz::moritz_read_AutoAckAddr();
-  }
 }
 //-------------------------------------------------------------------------------------------------------------------
 // <eof>
