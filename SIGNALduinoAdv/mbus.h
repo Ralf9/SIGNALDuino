@@ -6,7 +6,7 @@
 *
 * kaihs 2018: add support for WMBUS type C reception
 * Ralf9 2022: rf_mbus.c (culfw) in mbus.h umbenannt und fuer den SIGNALDuino angepasst und erweitert
-*
+* Ralf9 11.1.2025 update
 */
 
 #ifndef _MBUS_H
@@ -84,7 +84,7 @@ typedef struct RXinfoDescr {
 #define TX_OK                   0
 #define TX_LENGTH_ERROR         1
 #define TX_TO_IDLE1_ERROR       2
-#define TX_FLUSH_ERROR          4
+//#define TX_FLUSH_ERROR          4
 #define TX_UNDERFLOW_ERROR      8
 #define TX_TO_IDLE2_ERROR      16
 
@@ -121,7 +121,7 @@ void mbus_init(uint8_t ccN) {
     cc1101::writeReg(CC1100_TEST1, 0x35);
     cc1101::writeReg(CC1100_TEST0, 0x09);
     memset( &RXinfo, 0, sizeof( RXinfo ));
-    MSG_PRINTLN(F("mbus_init"));
+    MSG_PRINT(F("mbus_init"));
 }
 
 void mbus_init_tx(void) {
@@ -189,7 +189,17 @@ static uint8_t mbus_on(uint8_t force) {
     // init RX here, each time we're idle
     RXinfo.state = 0;
 
-    cc1101::flushrx();
+   #ifdef ESP32
+    cc1101::ccStrobe_SIDLE();
+    uint8_t maxloop = 0xff;
+    while (maxloop-- && cc1101::getMARCSTATE() != MARCSTATE_IDLE)
+        delayMicroseconds(10);
+    cc1101::cmdStrobe(CC1101_SFTX);   // Flush the TX FIFO buffer
+    cc1101::ccStrobe_SFRX();          // Flush the RX FIFO buffer
+   #else
+    cc1101::flushrx();                // SIDLE and Flush the RX FIFO buffer
+    cc1101::cmdStrobe(CC1101_SFTX);   // Flush the TX FIFO buffer
+   #endif
 
     // Initialize RX info variable
     RXinfo.lengthField = 0;           // Length Field in the wireless MBUS packet
@@ -453,7 +463,7 @@ uint8_t txSendPacket(uint8_t* pPacket, uint8_t* pBytes, uint16_t rawlen, uint8_t
     uint16_t  fixedLength;
     uint8_t   txStatus;
     int8_t    retstate = 0;
-    uint8_t   lastMode = WMBUS_NONE;
+    //uint8_t   lastMode = WMBUS_NONE;
     uint16_t  packetLength;
     uint16_t  TXn;
 
@@ -501,9 +511,7 @@ uint8_t txSendPacket(uint8_t* pPacket, uint8_t* pBytes, uint16_t rawlen, uint8_t
 
     // Flush TX FIFO
     // Ensure that FIFO is empty before transmit is started
-    if (cc1101::cmdStrobeTo(CC1101_SFTX) == false) {	// flush TX with wait MISO timeout
-        return TX_FLUSH_ERROR;
-    }
+    cc1101::cmdStrobe(CC1101_SFTX);  // flush TX
 
     TXn = TXinfo.bytesLeft;
     // Initialize the TXinfo struct.
