@@ -1,4 +1,4 @@
-// cc1101.h
+// cc1101.h  11.2.2025
 
 #ifndef _CC1101_h
 #define _CC1101_h
@@ -253,6 +253,7 @@ namespace cc1101 {
 #endif
 	}
 	
+#ifndef ESP32
 	uint8_t waitTo_Miso() {	// wait with timeout until MISO goes low
 		uint8_t i = 255;
 		while(isHigh(misoPin)) {
@@ -265,6 +266,7 @@ namespace cc1101 {
 		}
 		return i;
 	}
+#endif
 
 	uint8_t cmdStrobe(const uint8_t cmd) {                  // send command strobe to the CC1101 IC via SPI
 		cc1101_Select();                                // select CC1101
@@ -274,7 +276,8 @@ namespace cc1101 {
 		cc1101_Deselect();                              // deselect CC1101
 		return ret;					// Chip Status Byte
 	}
-	
+
+#ifndef ESP32
 	uint8_t cmdStrobeTo(const uint8_t cmd) {            // wait MISO and send command strobe to the CC1101 IC via SPI
 		cc1101_Select();                                // select CC1101
 		if (waitTo_Miso() == 0) {                       // wait with timeout until MISO goes low
@@ -285,6 +288,7 @@ namespace cc1101 {
 		cc1101_Deselect();                              // deselect CC1101
 		return true;
 	}
+#endif
 
 	uint8_t readReg(const uint8_t regAddr, const uint8_t regType) {       // read CC1101 register via SPI
 		cc1101_Select();                                // select CC1101
@@ -390,6 +394,15 @@ namespace cc1101 {
          }
          MSG_PRINTLN("");
        }
+       else if (reg == 0xff) {                   // Frequenz
+           float freq;
+           freq = readReg(CC1101_FREQ2, CC1101_CONFIG) * 256;
+           freq = (freq + readReg(CC1101_FREQ1, CC1101_CONFIG)) * 256;
+           freq += readReg(CC1101_FREQ0, CC1101_CONFIG);
+           freq = (26 * freq) / 65536 + 0.0005;
+           MSG_PRINT(F("freq = "));
+           MSG_PRINTLN(freq, 3);
+       }
        else {
          MSG_PRINTLN(F("error"));
        }
@@ -406,12 +419,18 @@ namespace cc1101 {
         reg = tools::hex2int(hex) + 0x30;
         if (reg < 0x3e) {
              cc1101_Select();
+             #ifndef ESP32
              if (waitTo_Miso() == 0) {                 // wait with timeout until MISO goes low
                  MSG_PRINTLN(F("timeout!"));
                  return;
              }
+             #endif
              val = sendSPI(reg);                       // send strobe command
              cc1101_Deselect();
+             if (cmdstring.charAt(2) != '3') {
+                MSG_PRINT(cmdstring.charAt(2));
+                MSG_PRINT(F(": "));
+             }
              MSG_PRINT(F("cmdStrobeReg "));
              printHex2(reg);
              MSG_PRINT(F(" chipStatus "));
@@ -654,7 +673,8 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 	{
 		cmdStrobe(CC1101_SFRX);
 	}
-	
+
+#ifndef ESP32
 	 uint8_t flushrx() {		// Flush the RX FIFO buffer
 		if (cmdStrobeTo(CC1101_SIDLE) == false) {
 			return false;
@@ -663,6 +683,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		cmdStrobe(CC1101_SFRX);
 		return true;
 	}
+#endif
 
 	void setReceiveMode()
 	{
@@ -674,7 +695,8 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		if (maxloop == 0 )		DBG_PRINTLN(F("CC1101: Setting RX failed"));
 
 	}
-	
+
+#ifndef ESP32
 	uint8_t flushTX()
 	{
 		if (cmdStrobeTo(CC1101_SFTX) == false) {	// flush TX with wait MISO timeout
@@ -683,6 +705,7 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		}
 		return true;
 	}
+#endif
 
 	uint8_t setTransmitMode()
 	{
@@ -696,7 +719,56 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		}
 		return true;
 	}
-	
+
+	void pllcheck(uint8_t PLL_Lock_test) {
+		if (cc1101::readReg(CC1100_FSCAL1, CC1101_CONFIG) == 0x3f) {
+			if ((PLL_Lock_test & (1 << radionr)) == 0) {
+				MSG_PRINT(F("PLL0_r="));
+				MSG_WRITE(radionr + 'A');
+				MSG_PRINTLN("");
+			}
+			else {
+				cc1101::ccStrobe_SIDLE();    // Idle mode
+				MSG_PRINT(F("PLL0_R="));
+				MSG_WRITE(radionr + 'A');
+				MSG_PRINTLN("");
+				cc1101::setReceiveMode(); 
+				if (cc1101::readReg(CC1100_FSCAL1, CC1101_CONFIG) == 0x3f) {
+					cc1101::ccStrobe_SIDLE();    // Idle mode
+					MSG_PRINTLN(F("PLL1!"));
+					cc1101::setReceiveMode();
+					if (cc1101::readReg(CC1100_FSCAL1, CC1101_CONFIG) == 0x3f) {
+						MSG_PRINTLN(F("PLL2!"));
+					}
+				}
+			}
+		}
+	}
+
+	void setFreq(float freq) {
+		uint32_t f;
+		uint8_t f2;
+		uint8_t f1;
+		uint8_t f0;
+		
+		f = freq / 26 * 65536;
+		f2 = freq / 26;
+		f1 = (f % 65536) / 256;
+		f0 = f % 256;
+		writeReg(CC1101_FREQ2, f2);
+		writeReg(CC1101_FREQ1, f1);
+		writeReg(CC1101_FREQ0, f0);
+		ccStrobe_SIDLE();
+		tools::EEbankWrite(CC1101_FREQ2 + 2, f2);
+		tools::EEbankWrite(CC1101_FREQ1 + 2, f1);
+		tools::EEbankWrite(CC1101_FREQ0 + 2, f0);
+		#if defined(MAPLE_Mini) || defined(ESP32)
+		tools::EEstore();
+		#endif
+		delay(1);
+		setReceiveMode();
+	}
+
 	bool CCreset(void) {
 		cc1101_Deselect();            // some deselect and selects to init the cc1101
 		delayMicroseconds(30);
@@ -709,15 +781,22 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		delayMicroseconds(45);
 
 		cc1101_Select();
+		#ifndef ESP32
 		if (waitTo_Miso() == 0) {  // wait with timeout until MISO goes low
 			return false;            // timeout
 		}
+		#else
+			delayMicroseconds(10);
+		#endif
 		sendSPI(CC1101_SRES);        // send strobe command
 		
+		#ifndef ESP32
 		if (waitTo_Miso() == 0) {  // wait with timeout until MISO goes low
 			return false;            // timeout
 		}
-		//delayMicroseconds(100);
+		#else
+		delayMicroseconds(100);
+		#endif
 		cc1101_Deselect();
 		
 		delay(1);
