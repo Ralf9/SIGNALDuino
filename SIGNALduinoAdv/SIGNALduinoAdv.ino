@@ -7,7 +7,7 @@
 *   there is an option to send almost any data over a send raw interface
 *   2014-2015  N.Butzek, S.Butzek
 *   2016 S.Butzek
-*   2020-2024 Ralf9
+*   2020-2025 Ralf9
 *
 *   This software focuses on remote sensors like weather sensors (temperature,
 *   humidity Logilink, TCM, Oregon Scientific, ...), remote controlled power switches
@@ -29,7 +29,7 @@
 *   You should have received a copy of the GNU General Public License
 *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-* Version from: https://github.com/Ralf9/SIGNALDuino/tree/dev-r422_cc1101
+* Version from: https://github.com/Ralf9/SIGNALDuino/tree/dev-r423_cc1101
 
 *------------------------------------------------------------------------------------------
 
@@ -40,7 +40,7 @@
 #include <Arduino.h>
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.3-dev241231"
+#define PROGVERS               "4.2.3-dev250212"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -76,13 +76,13 @@
 		#define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
 		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
 	#elif EVIL_CROW_RF
-		const uint8_t pinSend[] = {2, 26};
-		const uint8_t pinReceive[] = {4, 25, 14, 21};
-		#define PIN_LED              13
+		const uint8_t pinSend[] = {2, 25, 34};
+		const uint8_t pinReceive[] = {26, 4, 35, 21};
+		#define PIN_LED              32
 		#define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
 		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
 	#elif ESP32_SDUINO_TEST
-		const uint8_t pinSend[] = {26, 22};
+		const uint8_t pinSend[] = {26, 22, 4};
 		const uint8_t pinReceive[] = {25, 21, 14, 15};
 		#define PIN_LED              2
 		#define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
@@ -999,13 +999,36 @@ void loop() {
 #endif
 #ifdef ESP32
 	if (wifiConnected == true) {
-		if (millis() - previousMillis >= 60000) {
+		if (millis() - previousMillis >= 60000) {  // 60 sek
 			if (WiFi.status() != WL_CONNECTED) {
 				Serial.println(F("---WiFi disconnect(loop)---"));
 				Server.stop();  // end telnet server
 				wifiConnected = false;
 				wifiDisconnected = true;
-			}
+			}/*
+			else {
+				//MSG_PRINTLN(F("alive"));
+				if (LEDenabled) {
+					blinkLED=true;
+				}
+				MSG_PRINT(MSG_START);
+				MSG_PRINT(F("MN;D="));
+				for (uint8_t i = 0; i < 20; i++) {
+					printHex2(i*4);
+				}
+				MSG_PRINT(F(";N="));
+				MSG_PRINT(9);
+				MSG_PRINT(F(";R="))
+				MSG_PRINT(200);
+				MSG_PRINT(F(";"));
+				MSG_PRINT(MSG_END);
+				MSG_PRINT("\n");
+				if (command_available == false && cmdstring == "") {
+					cmdstring = "b";
+					cmd_bank();
+					cmdstring = "";
+				}
+			}*/
 			previousMillis = millis();
 		}
 	}
@@ -1048,6 +1071,13 @@ void loop() {
 				blinkLED=true;
 			}
 		}
+		#ifdef ESP32
+		else if (cmdstring.charAt(0) == '+') {
+			if (LEDenabled) {
+				blinkLED=true;
+			}
+		}
+		#endif
 		if (!command_available) { cmdstring = ""; }
 	}
 #ifdef MAPLE_WATCHDOG
@@ -1150,14 +1180,14 @@ void getRxFifo(uint16_t Boffs) {
 				RSSI = cc1101::getRSSI();
 			}
 			
-			if (ccmode == 9) {
+			/*if (ccmode == 9) {
 				if (fifoBytes > 1 && fifoBytes < 0x80) {
 					fifoBytes--;
 				}
 				MSG_PRINT(F("RX("));
 				MSG_PRINT(fifoBytes);
 				MSG_PRINT(F(") "));
-			}
+			}*/
 			if (fifoBytes < 0x80) {	// RXoverflow?
 				if (fifoBytes > ccMaxBuf) {
 					fifoBytes = ccMaxBuf;
@@ -1167,10 +1197,10 @@ void getRxFifo(uint16_t Boffs) {
 				  #ifdef ESP32
 				  if (ccmode != 7) { // nicht max
 				  #endif
-					if (ccmode != 9) {
+					//if (ccmode != 9) {
 						MSG_PRINT(MSG_START);
 						MSG_PRINT(F("MN;D="));
-					}
+					//}
 					for (uint8_t i = 0; i < fifoBytes; i++) {
 						printHex2(ccBuf[radionr][i]);
 						//MSG_PRINT(" ");
@@ -1178,12 +1208,12 @@ void getRxFifo(uint16_t Boffs) {
 				  #ifdef ESP32
 				  }	
 				  #endif
-					if (ccmode == 9) {
+					/*if (ccmode == 9) {
 						MSG_PRINT(F(" ("));
 						MSG_PRINT(cc1101::getRXBYTES());
 						MSG_PRINT(F(")"));
 					}
-					else {
+					else {*/
 					  #ifdef ESP32
 					  if (ccmode != 7) { // nicht max
 					  #endif
@@ -1199,14 +1229,11 @@ void getRxFifo(uint16_t Boffs) {
 							MSG_PRINT(F(";R="));
 							MSG_PRINT(RSSI);
 						}
-						/*if (FSKdebug) {
+						if (FSKdebug) {
 							marcstate = cc1101::getMARCSTATE();
-							fifoBytes = cc1101::getRXBYTES();
 							MSG_PRINT(F(";m="));
 							MSG_PRINT(marcstate);
-							MSG_PRINT(F(";b="));
-							MSG_PRINT(fifoBytes);
-						}*/
+						}
 						MSG_PRINT(F(";"));
 						MSG_PRINT(MSG_END);
 						MSG_PRINT("\n");
@@ -1221,7 +1248,7 @@ void getRxFifo(uint16_t Boffs) {
 					  #ifdef ESP32
 					  }
 					  #endif
-					}
+					//} // if (ccmode == 9)
 				}
 			}
 			if (ccmode == 4) {
@@ -1234,43 +1261,35 @@ void getRxFifo(uint16_t Boffs) {
 					cc1101::ccStrobe_SIDLE();	// Idle mode
 					cc1101::ccStrobe_SNOP();	// No operation
 					cc1101::ccStrobe_SRX();	// Enable RX
+					if (PLL_Lock_test > 0) {
+						cc1101::pllcheck(PLL_Lock_test);
+					}
 					break;
 				}
 			}
 			else {
 				marcstate = cc1101::getMARCSTATE();
-				if (ccmode == 9) {
+				/*if (ccmode == 9) {
 					MSG_PRINT(F(" M"));
 					MSG_PRINTLN(marcstate);
-				}
-				if (marcstate == 17 || ccmode == 3) {	// RXoverflow oder LaCrosse?
-					if (cc1101::flushrx()) {		// Flush the RX FIFO buffer
-						cc1101::setReceiveMode();
+				}*/
+				if (marcstate == 17 || ccmode == 3) {                 // RXoverflow oder LaCrosse?
+					if (ccmode == 3 && marcstate == MARCSTATE_RX) {   // Flush RX geht nur bei RX_OVERFLOW oder IDLE
+						cc1101::ccStrobe_SIDLE();
+						cc1101::cmdStrobe(CC1101_SNOP);
 					}
-				}
-				else if (marcstate != 13 && ccmode < 3) {  // marcstate 13 ist rx
+					cc1101::ccStrobe_SFRX();         // Flush the RX FIFO buffer
+					cc1101::ccStrobe_SIDLE();
+					cc1101::cmdStrobe(CC1101_SNOP);
 					cc1101::setReceiveMode();
 					if (PLL_Lock_test > 0) {
-						if (cc1101::readReg(CC1100_FSCAL1, CC1101_CONFIG) == 0x3f) {
-							if ((PLL_Lock_test & (1 << radionr)) == 0) {
-								MSG_PRINT(F("PLL0_r="));
-								MSG_PRINTLN(radionr);
-							}
-							else {
-								cc1101::ccStrobe_SIDLE();    // Idle mode
-								MSG_PRINT(F("PLL0_R="));
-								MSG_PRINTLN(radionr);
-								cc1101::setReceiveMode(); 
-								if (cc1101::readReg(CC1100_FSCAL1, CC1101_CONFIG) == 0x3f) {
-									cc1101::ccStrobe_SIDLE();    // Idle mode
-									MSG_PRINTLN(F("PLL1!"));
-									cc1101::setReceiveMode();
-									if (cc1101::readReg(CC1100_FSCAL1, CC1101_CONFIG) == 0x3f) {
-										MSG_PRINTLN(F("PLL2!"));
-									}
-								}
-							}
-						}
+						cc1101::pllcheck(PLL_Lock_test);
+					}
+				}
+				else if (marcstate != MARCSTATE_RX && ccmode < 3) {  // nicht rx?
+					cc1101::setReceiveMode();
+					if (PLL_Lock_test > 0) {
+						cc1101::pllcheck(PLL_Lock_test);
 					}
 				}
 			}
@@ -1298,10 +1317,8 @@ void getRxFifo(uint16_t Boffs) {
 #endif
 	}
 	else if (ccmode == 7 && cc1101::getMARCSTATE() == MARCSTATE_RXFIFO_OVERFLOW) {  // max
-		MSG_PRINT(F("ZERR_RXL_OVERFL "));
-		if (cc1101::cmdStrobeTo(CC1101_SFRX)) {
-			MSG_PRINT(F("ok "));
-		}
+		MSG_PRINT(F("ZERR_RXL_OVERFL ok m="));
+		cc1101::ccStrobe_SFRX();       // Flush the RX FIFO buffer
 		cc1101::setReceiveMode();
 		cc1101::printHex2(cc1101::getMARCSTATE());
 		MSG_PRINTLN("");
@@ -1710,9 +1727,8 @@ void send_cmd()
 	{
 		#ifdef CMP_CC1101
 		if (hasCC1101 && ccmode == 0) {
-			if (cc1101::flushTX()) {
-				cc1101::setTransmitMode();
-			}
+			//cc1101::cmdStrobe(CC1101_SFTX);  // flush TX
+			cc1101::setTransmitMode();
 		}
 		#endif
 		for (uint8_t i=0;i<repeats;i++)
@@ -1830,13 +1846,13 @@ void send_ccFIFO()
 		//MSG_PRINTLN(enddata);
 		if (enddata > startdata) {
 			disableReceive(false);
+			cc1101::cmdStrobe(CC1101_SFTX);  // flush TX
 			for (uint8_t i = 0; i < repeats; i++) {
-				if (cc1101::flushTX() == false) {
-					startdata = -2;
-					break;
+				if (cc1101::getMARCSTATE() == MARCSTATE_TXFIFO_UNDERFLOW) {
+					cc1101::cmdStrobe(CC1101_SFTX);  // flush TX
 				}
 				if (cc1101::setTransmitMode() == false) {
-					startdata = -3;
+					startdata = -2;
 					break;
 				}
 				cc1101::sendFIFO(startdata, enddata);
@@ -1848,6 +1864,7 @@ void send_ccFIFO()
 			if (marcstate != 13 && RXenabled[radionr] == true) {
 				if (marcstate != 1) {          // not idle
 					cc1101::ccStrobe_SIDLE();  // goto Idle mode
+					cc1101::cmdStrobe(CC1101_SFTX);  // flush TX
 					delay(1);
 				}
 				cc1101::setReceiveMode();
@@ -2036,7 +2053,7 @@ void cmd_bank()
 						cc1101::writeReg(i,val);
 					}
 				}
-				cc1101::flushrx();
+				cc1101::ccStrobe_SFRX();   // Flush the RX FIFO buffer
 				cc1101::setReceiveMode();
 				MSG_PRINT("fn=");
 				MSG_PRINT(n);
@@ -2082,7 +2099,7 @@ void cmd_bank()
 		else {
 			MSG_PRINT(F("The bank "));
 			MSG_PRINT(bank);
-			MSG_PRINT(F(" was not complete initialized, therefore the bank and radio is reseted to sduino defaults (raw e). Disable receive "));
+			MSG_PRINT(F(" was not complete initialized, therefore the bank and radio is reseted to sduino defaults (raw e). Disable receive. "));
 			cmd_ccFactoryReset();
             disableReceive(false);
 		}
@@ -2455,7 +2472,7 @@ void cmd_uptime()	// t: Uptime
 void cmd_test()
 {
 	uint16_t val16;
-	uint8_t val;
+	//uint8_t val;
 	uint8_t radio_nr;
 	char cmdc;
     
@@ -2465,7 +2482,11 @@ void cmd_test()
 	else if (cmdstring.charAt(1) == 'D') {
 		FSKdebug = true;
 	}
-	if (cmdstring.charAt(1) == 'L') {
+	else if (cmdstring.charAt(1) == 'F') {
+        float f = cmdstring.substring(2).toFloat();
+        cc1101::setFreq(f);
+    }
+	else if (cmdstring.charAt(1) == 'L') {
 		cmdc = cmdstring.charAt(2);
 		if (cmdc >= 'A' && cmdc <= 'D') {
 			radio_nr = (uint8_t)cmdc - 65;
@@ -2490,7 +2511,7 @@ void cmd_test()
 		val16 = cmdstring.substring(2).toInt();
 		if (val16 < 255) {
 			ConnectTimeout = val16 * 60;
-			tools::EEwrite(addr_ConnectTimeout, val16(uint8_t));
+			tools::EEwrite(addr_ConnectTimeout, (uint8_t)val16);
 			tools::EEstore();
 		}
 	}
@@ -2713,8 +2734,21 @@ void cmd_writeEEPROM()	// write EEPROM und CC11001 register
 	uint8_t reg;
 	bool ret = false;
 	
-    if (cmdstring.charAt(1) == 'S' && cmdstring.charAt(2) == '3' && hasCC1101) {       // WS<reg>  Command Strobes
+    if (cmdstring.charAt(1) == 'S' && hasCC1101) {   // WS<reg>  Command Strobes
+        uint8_t remRadionr = radionr;
+        if (cmdstring.charAt(2) >= 'A' && cmdstring.charAt(2) <= 'D') {   // Radio A-D
+            radionr = (uint8_t)cmdstring.charAt(2) - 65;
+            if (radio_bank[radionr] > 0x1F) {
+                MSG_PRINTLN(F("radio is not aktive!"));
+                radionr = remRadionr;
+                return;
+            }
+        } else if (cmdstring.charAt(2) != '3') {
+            unsuppCmd = true;
+            return;
+        }
         cc1101::commandStrobes();
+        radionr = remRadionr;
     } else if (cmdstring.charAt(1) == 'i') {	// write ip
         if (cmdstring.charAt(2) == 'a') {	// adress
             ret = tools::cmdstringPos2ip(ip, 3, EE_IP4_ADDR);
@@ -3492,9 +3526,9 @@ void setCCmode() {
        pinAsInput(pinSend[radionr]);
     }
     disableReceive(true);  // bei xFSK das Auslesen der Daten ueber GDO2 deaktivieren
-    if (cc1101::flushrx()) {
-      enableReceive();
-    }
+    cc1101::cmdStrobe(CC1101_SNOP);
+    cc1101::ccStrobe_SFRX();      // Flush the RX FIFO buffer
+    enableReceive();
   }
 }
 
@@ -3545,7 +3579,7 @@ void callGetFunctions(void)
 	getFunctions(false,&musterDecB.MSenabled, &musterDecB.MUenabled, &musterDecB.MCenabled, &musterDecB.MredEnabled, &musterDecB.MdebEnabled, &LEDenabled, &musterDecB.MSeqEnabled);
 	getCSvar();
 	PLL_Lock_test = tools::EEread(addr_PLL_test);
-	if (PLL_Lock_test > 15) {
+	if (PLL_Lock_test > 16) {
 		PLL_Lock_test = 0;
 	}
 	if (tools::EEread(addr_max_magic0) == max_magic0 && tools::EEread(addr_max_magic1) == max_magic1) {
