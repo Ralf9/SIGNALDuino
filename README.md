@@ -1,8 +1,8 @@
-# SIGNALDuino uC v4.2.2 (development version) for Maple Mini and ESP32 with multi cc1101 and xFSK support
+# SIGNALDuino uC v4.2.3 (development version) for Maple Mini and ESP32 with multi cc1101 and xFSK support
 
 ### Getting started
 
-System to receive digital signals and provide them to other systems pro demodulatiob.
+System to receive digital signals and provide them to other systems for demodulation.
 
 Firmware files  are in https://github.com/Ralf9/SIGNALDuino/releases
 
@@ -10,7 +10,6 @@ Compile it or use the and have fun.
 - If you are using the Arduino IDE, you have to copy the folder "SIGNALduinoAdv" with its contents into your sketch folder and edit the file compile_config.h 
  - If you use LAN, you need the Ethernet Library
  - If you use the ESP32, you need the WifiManager by tablatronix/tzapu
-The ESP32 board version 1.06 is the last version with the ESP-IDF v3.3.x, there may be WiFi problems with the ESP-IDF v4.4
 - If you are using platformio, you have to copy the files "extra_script.py", "platformio.ini" and the folder "SIGNALduinoAdv" with its contents into your project folder. 
 
 ### Using SIGNALDuino in FHEM
@@ -22,7 +21,7 @@ https://forum.fhem.de/index.php/topic,106278.0.html
 ### Tested microcontrollers
 
 * STM32 F103CBT6 (Maple Mini, bootloader v2.0)
-* ESP32
+* ESP32 (DEVKIT V1, D1 mini) 
 
 ### Signal from my device ist not detected
 
