@@ -7,7 +7,7 @@
 *   there is an option to send almost any data over a send raw interface
 *   2014-2015  N.Butzek, S.Butzek
 *   2016 S.Butzek
-*   2020-2022 Ralf9
+*   2020-2024 Ralf9
 *
 *   This software focuses on remote sensors like weather sensors (temperature,
 *   humidity Logilink, TCM, Oregon Scientific, ...), remote controlled power switches
@@ -40,7 +40,7 @@
 #include <Arduino.h>
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.3-dev241023"
+#define PROGVERS               "4.2.3-dev241121"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -70,8 +70,8 @@
 		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
 		#define PIN_WIZ_RST          13  // PC14
 	#elif SIGNALESP32
-		const uint8_t pinSend[] = {26, 4};
-		const uint8_t pinReceive[] = {25, 13, 14, 21};
+		const uint8_t pinSend[] = {26, 4, 21};
+		const uint8_t pinReceive[] = {25, 13, 22, 33};
 		#define PIN_LED              2
 		#define PIN_RECEIVE_A        pinReceive[0]   // gdo2 cc1101 A
 		#define PIN_RECEIVE_B        pinReceive[1]   // gdo2 cc1101 B
@@ -120,6 +120,7 @@
 #include "cc1101.h"
 #include "output.h"
 #include "mbus.h"
+#include "moritz.h"
 #include "bitstore4.h"
 #include "signalDecoder4.h"
 #include "SimpleFIFO.h"
@@ -215,11 +216,20 @@ Callee rssiCallee;
 
 //--- EEProm Address
 #define EE_MAGIC_OFFSET      0
+//#define addr_CWccreset     0x3A     ist in cc1101.h definiert
+//#define addr_CWccTEST      0x3B     ist in cc1101.h definiert
 //#define addr_togglesec       0x3C
 #define addr_ccN             0x3D
 #define addr_ccmode          0x3E
 //#define addr_features2       0x3F
 #define addr_bankdescr       0x40    // 0x40-0x47 bis Bank 9 0x88-0x8F  # Bank 0 bis Bank 9, Kurzbeschreibungen (max 8 Zeichen)
+// free 0x90 - 0xb9
+//#define addr_max_magic0      0xBA  ist in moritz.h definiert
+//#define addr_max_magic1      0xBB
+//#define addr_max_autoAck0    0xBC
+//#define addr_max_autoAck1    0xBD
+//#define addr_max_autoAck2    0xBE
+// free 0xBF
 //addr statRadio, alt eb - ee, 14.01.21
 #define addr_statRadio       0xE0    // A=E0 B=E1 C=E2 D=E3  Bit 0-3 Bank,  1F-Init, Bit 6 = 1 - Fehler bei Erkennung, Bit 6&7 = 1 - Miso Timeout, FF-deaktiviert
 #define addr_selRadio        0xE4    // alt EF
@@ -298,6 +308,7 @@ void cmd_freeRam();
 void cmd_send();
 void cmd_uptime();
 void cmd_test();
+void cmd_maxfunc();
 void cmd_Version();
 void cmd_writeEEPROM();
 void cmd_writePatable();
@@ -305,7 +316,7 @@ void changeReceiver();
 void enableReceive();
 void disableReceive(bool flagCCmode0);
 void callGetFunctions();
-void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *mseq);
+void getFunctions(bool radio0,bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *mseq);
 void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t deb, int8_t led, int8_t mseq);
 
 void getCSvar();
@@ -346,10 +357,10 @@ void setHasCC1101(uint8_t val);
 //--------------------------------------------------------------------------------
 
 //typedef void (* GenericFP)(int); //function pointer prototype to a function which takes an 'int' an returns 'void'
-#define cmdAnz 23
-const char cmd0[] =  {'?', '?', 'b', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'e', 'e', 'P', 'r', 'R', 'S', 't', 'T', 'V', 'W', 'x', 'X', 'X'};
-const char cmd1[] =  {'S', ' ', ' ', 'E', 'D', 'G', 'R', 'S', 'W', ' ', 'C', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'E', 'Q'};
-const bool cmdCC[] = {  0,   0,   0,   0,   0,   0,  1,   0,    1,   1,   0,   1,   0,   0,   0,   0,   0,   0,   0,   0,   1,   0,  0 };
+#define cmdAnz 24
+const char cmd0[] =  {'?', '?', 'b', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'e', 'e', 'P', 'r', 'R', 'S', 't', 'T', 'V', 'W', 'x', 'X', 'X','Z'};
+const char cmd1[] =  {'S', ' ', ' ', 'E', 'D', 'G', 'R', 'S', 'W', ' ', 'C', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'E', 'Q',' '};
+const bool cmdCC[] = {  0,   0,   0,   0,   0,   0,  1,   0,   1,   1,   0,   1,   0,   0,   0,   0,   0,   0,   0,   0,   1,   0,   0,  1 };
 void (*cmdFP[])(void) = {
 		cmd_help_S, // ?S
 		cmd_help,	// ?
@@ -373,7 +384,8 @@ void (*cmdFP[])(void) = {
 		cmd_writeEEPROM,// W
 		cmd_writePatable,// x
 		changeReceiver,	// XE
-		changeReceiver	// XQ
+		changeReceiver,	// XQ
+		cmd_maxfunc     // Z
 		};
 
 #define CSetAnz 14	// Anzahl der Konfig Variablen
@@ -503,7 +515,9 @@ void setup() {
     }, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_CONNECTED);
   #endif */
 	WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
-		Server.stop();  // end telnet server
+		if (wifiConnected == true) {
+			Server.stop();  // end telnet server
+		}
 		previousMillis = millis();
 		Serial.print(F("WiFi lost connection. Reason: "));
 	  #if ESP_IDF_VERSION_MAJOR < 4
@@ -512,14 +526,17 @@ void setup() {
 		lastWifiReason = info.wifi_sta_disconnected.reason;
 	  #endif
 		Serial.println(lastWifiReason);
-		//Serial.print(F("state: "));
+		//Serial.print(F(" state: "));
 		//Serial.println(WiFi.status());
-		if (lastWifiReason == 4) {
+		/*if (lastWifiReason == 8) {
 			Serial.println(F("---WiFi try reconnect---"));
-			WiFi.reconnect();
-			//WiFi.disconnect();
+			//WiFi.reconnect();
+			WiFi.disconnect();
 			//WiFi.begin();
-		}
+			Serial.println("*******ReConnected(8)*****");
+			Server.begin();    // start listening for clients
+			Server.setNoDelay(true);
+		}*/
 		wifiConnected = false;
 		wifiDisconnected = true;
   #if ESP_IDF_VERSION_MAJOR < 4
@@ -847,6 +864,7 @@ void setup() {
 			ccmode = tools::EEbankRead(addr_ccmode);
 			if (ccmode == 8) {
 				mbus_init(tools::EEbankRead(addr_ccN));
+				MSG_PRINTLN("");
 			}
 			if (radionr > 1 || ccmode > 0 || cc1101::regCheck()) {
 				if (tools::EEread(addr_rxRes) != 0xA5) {	// wenn A5 dann bleibt rx=0
@@ -979,7 +997,19 @@ void loop() {
 	ethernetLoop();
 #endif
 #ifdef ESP32
-	if (wifiDisconnected == true) {
+	if (wifiConnected == true) {
+		if (millis() - previousMillis >= 60000) {
+			if (WiFi.status() != WL_CONNECTED) {
+				Serial.println(F("---WiFi disconnect(loop)---"));
+				Server.stop();  // end telnet server
+				wifiConnected = false;
+				wifiDisconnected = true;
+			}
+			previousMillis = millis();
+		}
+	}
+	else {
+	 if (wifiDisconnected == true) {
 		unsigned long currentMillis;
 		while (WiFi.status() != WL_CONNECTED) {
 			currentMillis = millis();
@@ -990,21 +1020,21 @@ void loop() {
 				}
 			  #endif
 				Serial.println(F("---WiFi try reconnect(loop)---"));
+				//WiFi.disconnect();
 				WiFi.reconnect();
 				previousMillis = currentMillis;
 			}
 			yield();
 		}
 		wifiDisconnected = false;
-	}
-	if (wifiConnected == false) {
-		while (WiFi.status() != WL_CONNECTED) {
-			yield();
-		}
+	 }
+	 if (wifiConnected == false) {
+		delay(100);
 		wifiConnected = true;
-		Serial.println("*******Connected*****");
+		Serial.println("***Connected***");
 		Server.begin();    // start listening for clients
 		Server.setNoDelay(true);
+	 }
 	}
 	serialEvent();
 	WiFiEvent();
@@ -1133,6 +1163,9 @@ void getRxFifo(uint16_t Boffs) {
 				}
 				dup = cc1101::readRXFIFOdup(fifoBytes, ccmode, appendRSSI);
 				if (ccmode != 2 || dup == false) {
+				  #ifdef ESP32
+				  if (ccmode != 7) { // nicht max
+				  #endif
 					if (ccmode != 9) {
 						MSG_PRINT(MSG_START);
 						MSG_PRINT(F("MN;D="));
@@ -1141,12 +1174,18 @@ void getRxFifo(uint16_t Boffs) {
 						printHex2(ccBuf[radionr][i]);
 						//MSG_PRINT(" ");
 					}
+				  #ifdef ESP32
+				  }	
+				  #endif
 					if (ccmode == 9) {
 						MSG_PRINT(F(" ("));
 						MSG_PRINT(cc1101::getRXBYTES());
 						MSG_PRINT(F(")"));
 					}
 					else {
+					  #ifdef ESP32
+					  if (ccmode != 7) { // nicht max
+					  #endif
 						uint8_t n = tools::EEread(Boffs + addr_ccN);
 						if (n > 0) {
 							MSG_PRINT(F(";N="));
@@ -1162,6 +1201,9 @@ void getRxFifo(uint16_t Boffs) {
 						MSG_PRINT(F(";"));
 						MSG_PRINT(MSG_END);
 						MSG_PRINT("\n");
+					  #ifdef ESP32
+					  }
+					  #endif
 					}
 				}
 			}
@@ -1193,10 +1235,37 @@ void getRxFifo(uint16_t Boffs) {
 					cc1101::setReceiveMode();
 				}
 			}
+			if (ccmode == 7) {  // max
+				uint8_t enc[10];
+				for (uint8_t i = 0; i < 10; i++) {
+					enc[i] = ccBuf[radionr][i];
+				}
+				moritz::moritz_handleAutoAck(enc);
+				#ifdef ESP32
+				MSG_PRINT(MSG_START);
+				MSG_PRINT(F("MN;D="));
+				for (uint8_t i = 0; i < fifoBytes; i++) {
+					printHex2(ccBuf[radionr][i]);
+				}
+				uint8_t n = tools::EEread(Boffs + addr_ccN);
+				char buf[12];
+				sprintf(buf, ";N=%u;r;%c\n", n, MSG_END);
+				MSG_PRINT(buf);
+				#endif
+			}
 		}
 #ifdef DEBUG_BackupReg
 	setBackupReg(2);
 #endif
+	}
+	else if (ccmode == 7 && cc1101::getMARCSTATE() == MARCSTATE_RXFIFO_OVERFLOW) {  // max
+		MSG_PRINT(F("ZERR_RXL_OVERFL "));
+		if (cc1101::cmdStrobeTo(CC1101_SFRX)) {
+			MSG_PRINT(F("ok "));
+		}
+		cc1101::setReceiveMode();
+		cc1101::printHex2(cc1101::getMARCSTATE());
+		MSG_PRINTLN("");
 	}
 }
 
@@ -1601,7 +1670,11 @@ void send_cmd()
 	} else
 	{
 		#ifdef CMP_CC1101
-		if (hasCC1101 && ccmode == 0) cc1101::setTransmitMode();	
+		if (hasCC1101 && ccmode == 0) {
+			if (cc1101::flushTX()) {
+				cc1101::setTransmitMode();
+			}
+		}
 		#endif
 		for (uint8_t i=0;i<repeats;i++)
 		{
@@ -1719,8 +1792,12 @@ void send_ccFIFO()
 		if (enddata > startdata) {
 			disableReceive(false);
 			for (uint8_t i = 0; i < repeats; i++) {
+				if (cc1101::flushTX() == false) {
+					startdata = -2;
+					break;
+				}
 				if (cc1101::setTransmitMode() == false) {
-					startdata = -1;
+					startdata = -3;
 					break;
 				}
 				cc1101::sendFIFO(startdata, enddata);
@@ -1748,9 +1825,10 @@ void send_ccFIFO()
 	  radionr = remRadionr;
 	  ccmode = remccmode;
 	}
-	if (startdata == -1 || startn == -1)
+	if (startdata < 0 || startn == -1)
 	{
-		MSG_PRINTLN(F("send failed!"));
+		MSG_PRINT(F("send failed! "));
+		MSG_PRINTLN(startdata);
 	}
 }
 
@@ -1956,6 +2034,7 @@ void cmd_bank()
 				if (hasCC1101) cc1101::CCinit();
 				if (ccmode == 8) {
 					mbus_init(tools::EEbankRead(addr_ccN));
+					MSG_PRINTLN("");
 				}
 				setCCmode();
 			}
@@ -2375,10 +2454,49 @@ void cmd_test()
 	#ifdef ESP32
 	MSG_PRINT(F("wifiConnectTimeout="));
 	MSG_PRINT(ConnectTimeout);
+	MSG_PRINT(F(" RSSI= "));
+	MSG_PRINT(WiFi.RSSI());
 	MSG_PRINT(F(" "));
 	#endif
 	MSG_PRINT(F("FSKdebug="));
 	MSG_PRINTLN(FSKdebug);
+}
+
+//--------------------------------------------------------------------------------
+void cmd_maxfunc()
+{
+    uint8_t c;
+    
+    c = cmdstring.charAt(1);
+     
+    if (c == 's' || c == 'f') {     // Send/Send fast
+        uint8_t remRadionr = radionr;
+        uint16_t bankoff;
+        radionr = 255;
+        for (uint8_t r = 0; r < 4; r++) {  // die den radio zugeordneten Baenke nach sendN durchsuchen
+            if (radio_bank[r] > 9) {
+                continue;
+            }
+            bankoff = getBankOffset(radio_bank[r]);
+            if (tools::EEread(bankoff + addr_ccmode) == 7) { // max
+                radionr = r;
+                break;
+            }
+        }
+        if (radionr < 4) {
+            moritz::moritz_func(c);
+        }
+        else {
+            MSG_PRINTLN(F("no max config found!"));
+        }
+        radionr = remRadionr;
+    }
+    else if (c == 'a' || c == 'g') {
+        moritz::moritz_func(c);
+    }
+    else {
+       unsuppCmd = true;   
+    }
 }
 
 //--------------------------------------------------------------------------------
@@ -2393,10 +2511,12 @@ void ccRegWrite()	// CW cc register write
 	bool flag = false;
 	bool resetFlag = false;
 
+// addr_CWccreset 0x3A - wenn A5 oder A6, dann erfolgt bei CW (ccRegWrite) ein ccReset
+// addr_CWccTEST  0x3B - wenn = 6x und CWccreset = A5 dann werden beim CCinit_reg auch CC1101_TEST2 - TEST0 gesetzt (bit2-TEST2 0x2C, bit1-Test1 0x2D, bit0-Test0 0x2E)
 	uint8_t CWccreset = tools::EEbankRead(addr_CWccreset);
 	if ((CWccreset == 0xA5 || CWccreset == 0xA6) &&  cmdstring.charAt(6) == ',') { 
 		cc1101::ccFactoryReset(false);
-		cc1101::CCinit();
+		//cc1101::CCinit();
 		resetFlag = true;
 	}
 
@@ -2466,7 +2586,12 @@ void ccRegWrite()	// CW cc register write
 			MSG_PRINT(F(",ccmode="));
 			MSG_PRINT(tmp_ccmode);
 			ccmode = tmp_ccmode;
+			CWccreset = tools::EEbankRead(addr_CWccreset);
+			if (resetFlag == true || CWccreset == 0xA5 || CWccreset == 0xA6) {
+				cc1101::CCinit();
+			}
 			if (ccmode == 8) {
+				MSG_PRINT(F(","));
 				mbus_init(tmp_ccN);
 			}
 			setCCmode();
@@ -3549,6 +3674,9 @@ void initEEPROM(void)
     tools::EEstore();
   }
   callGetFunctions();
+  if (tools::EEread(addr_max_magic0) == max_magic0 && tools::EEread(addr_max_magic1) == max_magic1) {
+    moritz::moritz_read_AutoAckAddr();
+  }
 }
 //-------------------------------------------------------------------------------------------------------------------
 // <eof>
