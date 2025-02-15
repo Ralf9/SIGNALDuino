@@ -40,7 +40,7 @@
 #include <Arduino.h>
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.2-dev220712"
+#define PROGVERS               "4.2.3-dev241023"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -224,9 +224,9 @@ Callee rssiCallee;
 #define addr_statRadio       0xE0    // A=E0 B=E1 C=E2 D=E3  Bit 0-3 Bank,  1F-Init, Bit 6 = 1 - Fehler bei Erkennung, Bit 6&7 = 1 - Miso Timeout, FF-deaktiviert
 #define addr_selRadio        0xE4    // alt EF
 #define addr_res_e5          0xE5 // reserve
-#define addr_res_e6          0xE6
-#define addr_res_e7          0xE7
-#define addr_res_e8          0xE8
+#define addr_res_e6          0xE6 // reserve
+#define addr_res_e7          0xE7 // reserve
+#define addr_ConnectTimeout  0xE8    // wifiManager.setConnectTimeout in Minuten (nur bei ESP32)
 #define addr_rxRes           0xE9    // bei 0xA5 ist rx nach dem Reset disabled
 // CSetAddr[] res ea - fd, alt f0 - fc, 14.01.21
 //      addr_features                res mseq led deb red mc mu ms  (7 .. 0)
@@ -334,6 +334,10 @@ void setHasCC1101(uint8_t val);
 #endif
 #ifdef ESP32
 	bool wifiConnected = true;
+	bool wifiDisconnected = false;
+    uint8_t lastWifiReason = 0;
+	unsigned long previousMillis = 0;
+    uint16_t ConnectTimeout = 0;  // fuer wifiManager.setConnectTimeout
 	inline void WiFiEvent();
 	void IRAM_ATTR cronjob(void *pArg);
 #else
@@ -484,7 +488,12 @@ void setup() {
 	server.begin();		// start listening for clients
 
 #elif defined(ESP32)
-	WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+	uint8_t val = tools::EEread(addr_ConnectTimeout);
+	if (val == 255) {
+		val = 0;
+	}
+	ConnectTimeout = val * 60;
+	/*WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
 		Serial.println(F("-----WiFi connected------"));
 		Server.begin();  // start telnet server
 		Server.setNoDelay(true);
@@ -492,22 +501,27 @@ void setup() {
 	}, WiFiEvent_t::SYSTEM_EVENT_STA_CONNECTED);
   #else
     }, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_CONNECTED);
-  #endif	
+  #endif */
 	WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
 		Server.stop();  // end telnet server
+		previousMillis = millis();
 		Serial.print(F("WiFi lost connection. Reason: "));
 	  #if ESP_IDF_VERSION_MAJOR < 4
-		Serial.println(info.disconnected.reason);
-		if (info.disconnected.reason == 4) {
+		lastWifiReason = info.disconnected.reason;
 	  #else
-        Serial.println(info.wifi_sta_disconnected.reason);
-		if (info.wifi_sta_disconnected.reason == 4) {
+		lastWifiReason = info.wifi_sta_disconnected.reason;
 	  #endif
-			Serial.println(F("-----WiFi try reconnect------"));
-			WiFi.disconnect();
-			WiFi.begin();
+		Serial.println(lastWifiReason);
+		//Serial.print(F("state: "));
+		//Serial.println(WiFi.status());
+		if (lastWifiReason == 4) {
+			Serial.println(F("---WiFi try reconnect---"));
+			WiFi.reconnect();
+			//WiFi.disconnect();
+			//WiFi.begin();
 		}
 		wifiConnected = false;
+		wifiDisconnected = true;
   #if ESP_IDF_VERSION_MAJOR < 4
 	}, WiFiEvent_t::SYSTEM_EVENT_STA_DISCONNECTED);
   #else
@@ -540,7 +554,7 @@ void setup() {
 	char IBuf[6];
 	IBuf[0] = 0;
 	uint8_t Iidx = 0;
-	Serial.print(F("\nserial menue? (enter 'cmd') ")); Serial.print(F("Timeout:")); Serial.println(serTimeout * 10);
+	Serial.print(F("\nserial menue? (enter 'cmd') ")); Serial.print(F("Timeout:")); Serial.print(serTimeout * 10); Serial.println(F(" ms"));
 	while (serTimeout > 0) {
 		if ( Serial.available() && Iidx < 5)
 		{
@@ -572,6 +586,8 @@ void setup() {
 		else {
 			Serial.println(F("static"));
 		}
+		Serial.print(F("T - disable setConnectTimeout, act: "));
+		Serial.println(ConnectTimeout);
 		Serial.println(F("R - resetWifiSettings"));
 		Serial.println(F("q - quit"));
 		
@@ -605,6 +621,10 @@ void setup() {
 								Serial.println(F("new: DHCP"));
 							}
 						}
+						else if (IBuf[0] == 'T') {
+							Serial.println(F("ConnectTimeout disabled"));
+							ConnectTimeout = 0;
+						}
 						else if (IBuf[0] == 'R') {
 							Serial.println(F("Return to AP-mode, because reset command received."));
 							//--- reset saved settings
@@ -633,7 +653,10 @@ void setup() {
 	
 		//--- set callback that gets called, when connecting to previous WiFi fails, and enters AP-mode
 		wifiManager.setAPCallback(configModeCallback);
-
+        
+        if (ConnectTimeout > 0) {
+            wifiManager.setConnectTimeout(ConnectTimeout);
+        }
 		if ( !wifiManager.autoConnect("ESP32DuinoConfig",NULL) ) 
 		{
 			Serial.println(F("failed to connect and hit timeout"));
@@ -668,6 +691,7 @@ void setup() {
 	}
 	
 	Server.begin();    // start listening for clients
+	Server.setNoDelay(true);
 	
 #else  // MapleMini USB
 	if (tools::EEread(addr_rxRes) == 0xA5) {	// wenn A5 dann bleibt rx=0 und es gibt keine "Unsupported command" Meldungen
@@ -955,6 +979,24 @@ void loop() {
 	ethernetLoop();
 #endif
 #ifdef ESP32
+	if (wifiDisconnected == true) {
+		unsigned long currentMillis;
+		while (WiFi.status() != WL_CONNECTED) {
+			currentMillis = millis();
+			if (currentMillis - previousMillis >= 30000) {
+			  #if ESP_IDF_VERSION_MAJOR < 4
+				if (lastWifiReason == 200) {
+					ESP.restart();
+				}
+			  #endif
+				Serial.println(F("---WiFi try reconnect(loop)---"));
+				WiFi.reconnect();
+				previousMillis = currentMillis;
+			}
+			yield();
+		}
+		wifiDisconnected = false;
+	}
 	if (wifiConnected == false) {
 		while (WiFi.status() != WL_CONNECTED) {
 			yield();
@@ -962,6 +1004,7 @@ void loop() {
 		wifiConnected = true;
 		Serial.println("*******Connected*****");
 		Server.begin();    // start listening for clients
+		Server.setNoDelay(true);
 	}
 	serialEvent();
 	WiFiEvent();
@@ -2287,12 +2330,24 @@ void cmd_uptime()	// t: Uptime
 //--------------------------------------------------------------------------------
 void cmd_test()
 {
+	uint16_t val;
+    
 	if (cmdstring.charAt(1) == 'd') {
 		FSKdebug = false;
 	}
 	else if (cmdstring.charAt(1) == 'D') {
 		FSKdebug = true;
 	}
+	#ifdef ESP32
+	else if (cmdstring.charAt(1) == 'T') {
+		val = cmdstring.substring(2).toInt();
+		if (val < 255) {
+			ConnectTimeout = val * 60;
+			tools::EEwrite(addr_ConnectTimeout, val);
+			tools::EEstore();
+		}
+	}
+	#endif
 	else {
 	#ifdef ARDUINO
 		MSG_PRINT(F("a="));
@@ -2317,6 +2372,11 @@ void cmd_test()
 		MSG_PRINT(F(" "));
 	#endif
 	}
+	#ifdef ESP32
+	MSG_PRINT(F("wifiConnectTimeout="));
+	MSG_PRINT(ConnectTimeout);
+	MSG_PRINT(F(" "));
+	#endif
 	MSG_PRINT(F("FSKdebug="));
 	MSG_PRINTLN(FSKdebug);
 }
@@ -3243,6 +3303,8 @@ void printHex2(const uint8_t hex) {   // Todo: printf oder scanf nutzen
 
 void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t deb, int8_t led, int8_t mseq)
 {
+    uint8_t datb;
+    
 	// res mseq led deb red mc mu ms  (7 .. 0)
 	mu=mu<<1;
 	mc=mc<<2;
@@ -3252,23 +3314,40 @@ void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t de
 	mseq=mseq<<6;
 	
 	uint8_t dat =  ms | mu | mc | red | deb | led | mseq;
-	tools::EEwrite(addr_featuresB,dat);
+    if (radionr == 0) {
+        tools::EEwrite(addr_featuresA,dat);
+        datb = tools::EEread(addr_featuresB);
+        if (led != datb & 0x20) {
+            datb &= 0xDF;
+            datb |= led;
+            tools::EEwrite(addr_featuresB,datb);
+        }
+    }
+    else {
+        tools::EEwrite(addr_featuresB,dat);
+    }
 	tools::EEstore();
 }
 
 //--------------------------------------------------------------------------------
 void callGetFunctions(void)
 {
-	getFunctions(&musterDecA.MSenabled, &musterDecA.MUenabled, &musterDecA.MCenabled, &musterDecA.MredEnabled, &musterDecA.MdebEnabled, &LEDenabled, &musterDecA.MSeqEnabled);
-	getFunctions(&musterDecB.MSenabled, &musterDecB.MUenabled, &musterDecB.MCenabled, &musterDecB.MredEnabled, &musterDecB.MdebEnabled, &LEDenabled, &musterDecB.MSeqEnabled);
+	getFunctions(true, &musterDecA.MSenabled, &musterDecA.MUenabled, &musterDecA.MCenabled, &musterDecA.MredEnabled, &musterDecA.MdebEnabled, &LEDenabled, &musterDecA.MSeqEnabled);
+	getFunctions(false,&musterDecB.MSenabled, &musterDecB.MUenabled, &musterDecB.MCenabled, &musterDecB.MredEnabled, &musterDecB.MdebEnabled, &LEDenabled, &musterDecB.MSeqEnabled);
 	getCSvar();
 }
 
 //--------------------------------------------------------------------------------
-void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *mseq)
+void getFunctions(bool radio0,bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *mseq)
 {
-    uint8_t dat = tools::EEread(addr_featuresB);
-
+    uint8_t dat;
+    
+    if (radio0) {
+        dat = tools::EEread(addr_featuresA);
+    }
+    else {
+        dat = tools::EEread(addr_featuresB);
+    }
     // res mseq led deb red mc mu ms  (7 .. 0)
     *ms=bool (dat &(1<<0));
     *mu=bool (dat &(1<<1));
@@ -3441,7 +3520,7 @@ void initEEPROMconfig(void)
 	tools::EEwrite(addr_res_e5, 0xFF); // reserve
 	tools::EEwrite(addr_res_e6, 0xFF);
 	tools::EEwrite(addr_res_e7, 0xFF);
-	tools::EEwrite(addr_res_e8, 0xFF);
+	tools::EEwrite(addr_ConnectTimeout, 0);
 	tools::EEwrite(addr_rxRes, 0xFF);
 	tools::EEstore();
 	MSG_PRINTLN(F("Init eeprom to defaults"));
