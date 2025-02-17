@@ -35,7 +35,7 @@
 #include "compile_config.h"
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.5-dev210522"
+#define PROGVERS               "3.3.5-dev170225"
 #define VERSION_1               0x33
 #define VERSION_2               0x40
 
@@ -1009,7 +1009,7 @@ void cmd_help_S()	// get help configvariables
 {
 	char buffer[12];
 	for (uint8_t i = 0; i < CSetAnz; i++) {
-	    strcpy_P(buffer, (char*)pgm_read_word(&(CSetCmd[i])));
+	    strcpy_P(buffer, (char*)pgm_read_ptr(&(CSetCmd[i])));
 	    MSG_PRINT(F("CS"));
 	    MSG_PRINT(buffer);
 	    MSG_PRINT(F("= "));
@@ -1285,12 +1285,17 @@ void cmd_Version()	// V: Version
 #ifdef ONLY_FSK
     MSG_PRINT(F("only xFSK "));
 #endif
-	MSG_PRINT(F("(b"));
-	if (toggleBankEnabled == false) {
-		MSG_PRINT(bank);
-	} else {
-		MSG_PRINT(F("x"));
+	if (RXenabled == true) {
+		MSG_PRINT(F("(B"));
 	}
+	else {
+		MSG_PRINT(F("(b"));
+	}
+	//if (toggleBankEnabled == false) {
+		MSG_PRINT(bank);
+	//} else {
+	//	MSG_PRINT(F("x"));
+	//}
 	MSG_PRINT(F(") "));
 	MSG_PRINTLN(F("- compiled at " __DATE__ " " __TIME__));
 }
@@ -1310,7 +1315,12 @@ void cmd_send()
 			send_cmd(); // Part of Send
 		}
 		else {
-			send_ccFIFO();
+			if (hasCC1101) {
+				send_ccFIFO();
+			}
+			else {
+				unsuppCmd = true;
+			}
 		}
 	}
 }
@@ -1320,9 +1330,15 @@ void cmd_uptime()	// t: Uptime
 	MSG_PRINTLN(getUptime());
 }
 
-void cmd_test()	// T<bank><sec>
+void cmd_test()
 {
-    unsuppCmd = true;
+	#ifdef ARDUINO
+		MSG_PRINT(F("a="));
+		MSG_PRINT(ARDUINO);
+		MSG_PRINTLN(F(" "));
+	#else
+		unsuppCmd = true;
+	#endif
 }
 
 void ccRegWrite()	// CW cc register write
