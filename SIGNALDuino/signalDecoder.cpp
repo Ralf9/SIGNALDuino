@@ -441,7 +441,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 		} else if (MuMoveCount > 0) {
 			calcHisto();
 		} else if (MuOverflCount > 0) {
-			state == syncfound;
+			state = syncfound;
 		}
 		
 		if (state == searching) {
@@ -703,7 +703,7 @@ void SignalDetectorClass::processMessage(const uint8_t p_valid)
 			success = true;
 		  }
 		  else {		  // m_endfound && (mend - mstart) < minMessageLen)  -> weiter mit MU message verarbeitung
-			success == false;
+			success = false;
 		  }
 		}
 		if (success == false && (MUenabled || MCenabled)) {
@@ -1817,6 +1817,7 @@ const bool ManchesterpatternDecoder::doDecode() {
 			}
 		}
 	}
+	return false;
 }
 /*
 #ifdef DEBUGDECODE
