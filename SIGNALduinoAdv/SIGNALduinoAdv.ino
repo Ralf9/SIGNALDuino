@@ -40,7 +40,7 @@
 #include <Arduino.h>
 
 #define PROGNAME               " SIGNALduinoAdv "
-#define PROGVERS               "4.2.3-dev250212"
+#define PROGVERS               "4.2.3-dev250330"
 #define VERSION_1               0x41
 #define VERSION_2               0x2d
 
@@ -159,6 +159,7 @@ Callee rssiCallee;
   
   #include <WiFi.h>
   #include <WiFiType.h>
+  #include <esp_mac.h>
   #include <WiFiManager.h>
   #define WIFI_MANAGER_OVERRIDE_STRINGS
   
@@ -482,6 +483,11 @@ void setup() {
 	sichBackupReg = (uint8_t)getBackupRegister(RTC_BKP_INDEX);
 #endif
 	tools::EEbufferFill();
+	#ifdef ESP32
+	if (tools::EEread(EE_MAGIC_OFFSET) != VERSION_1 || tools::EEread(EE_MAGIC_OFFSET+1) != VERSION_2) {
+		initEthernetConfig();
+	}
+	#endif
 	getEthernetConfig(true);
 	pinAsOutput(PIN_LED);
 #ifdef LAN_WIZ
@@ -637,6 +643,10 @@ void setup() {
 							else {
 								ip[3] = 0;
 								Serial.println(F("new: DHCP"));
+							}
+							if (ip[3] != tools::EEread(EE_IP4_ADDR+3)) {
+								tools::EEwrite(EE_IP4_ADDR+3, ip[3]);
+								tools::EEstore();
 							}
 						}
 						else if (IBuf[0] == 'T') {
@@ -2345,6 +2355,9 @@ void print_radio_sum()	// br - Bankinfo fuer alle cc1101 denen eine Bank zugeord
 //--------------------------------------------------------------------------------
 void print_mac(uint8_t mac[])
 {
+#ifdef ESP32
+	esp_read_mac(mac, ESP_MAC_WIFI_STA);
+#endif
 	for (uint8_t i = 0; i < 6; i++) {
 		printHex2(mac[i]);
 		if (i < 5) {
@@ -3230,7 +3243,7 @@ uint8_t radioDetekt(bool confmode, uint8_t Dstat)
 		MSG_PRINT(pn);
 		MSG_PRINT(F(" Ver=0x"));
 		printHex2(ver);
-		if (pn == 0 && ver > 0 && ver < 0xFF) {
+		if (pn != 0xFF && ver > 0 && ver < 0xFF) {
 			MSG_PRINTLN("");
 			if (confmode || (Dstat & 0x0F) == 0x0F) {
 				Dstat = 0x1F;	// 'i'
@@ -3704,21 +3717,16 @@ void getEthernetConfig(bool flag)
 {
 	uint8_t i;
 	
-  if (flag) {
 #ifdef MAPLE_Mini
+  if (flag) {
 	if (tools::EEread(EE_MAC_ADDR) != mac_def[0] || tools::EEread(EE_MAC_ADDR+1) != mac_def[1] || tools::EEread(EE_MAC_ADDR+2) != mac_def[2]) {
 		initEthernetConfig();
 	}
 	for (i = 0; i < 6; i++) {
 		mac[i] = tools::EEread(EE_MAC_ADDR+i);
 	}
-#endif
-#ifdef ESP32
-	if (tools::EEread(EE_IP4_ADDR) == 0 || tools::EEread(EE_IP4_ADDR) == 255 || tools::EEread(EE_IP4_GATEWAY) == 0 || tools::EEread(EE_IP4_GATEWAY) == 255) {
-		initEthernetConfig();
-	}
-#endif
   }
+#endif
 	for (i = 0; i < 4; i++) {
 		ip[i] = tools::EEread(EE_IP4_ADDR+i);
 		gateway[i] = tools::EEread(EE_IP4_GATEWAY+i);
