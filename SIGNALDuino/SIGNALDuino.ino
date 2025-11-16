@@ -90,10 +90,8 @@
 #if defined (ARDUINO_ARCH_RP2040)
   #include <RPi_Pico_TimerInterrupt.h>  // https://github.com/khoih-prog/RPI_PICO_TimerInterrupt 
   RPI_PICO_Timer ITimer1(1);
-  EEPROM24* EepromPtr = new EEPROM24(Wire, EEPROM_24LC08);
 #else
   #include <TimerOne.h>  // Timer for LED Blinking
-  EEPROMClass* EepromPtr = &EEPROM;
 #endif
 
 
@@ -284,17 +282,8 @@ void setup() {
   #ifdef DEBUG
 	delay(2000);
   #endif
-#if defined (ARDUINO_ARCH_RP2040)
-  Wire.begin();
-	if (!EepromPtr->available())
-   {
-     Serial.println("No memory detected. Freezing.");
-      #ifdef WATCHDOG
-        DISABLE_WATCHDOG();
-      #endif
-     while (true)
-       ;
-   }
+#if defined (ARDUINO_ARCH_RP2040) and defined(EEPROM_RPI_simulated)
+	EEPROM.begin(EEPROM_RPI_size);
 #endif
 #if defined(ARDUINO_BUSWARE_CUL)
 	clock_prescale_set(clock_div_1);
@@ -507,7 +496,7 @@ void loop() {
 			uint8_t marcstate;
 			bool appendRSSI = false;
 			uint8_t RSSI = 0;
-			if ((EepromPtr->read(bankOffset + 2 +CC1101_PKTCTRL1) & 4) == 4) {
+			if ((EEPROM.read(bankOffset + 2 +CC1101_PKTCTRL1) & 4) == 4) {
 				appendRSSI = true;
 			}
 			else {
@@ -539,7 +528,7 @@ void loop() {
 						MSG_PRINT(F(")"));
 					}
 					else {
-						uint8_t n = EepromPtr->read(bankOffset + addr_ccN);
+						uint8_t n = EEPROM.read(bankOffset + addr_ccN);
 						if (n > 0) {
 							MSG_PRINT(F(";N="));
 							MSG_PRINT(n);
@@ -589,7 +578,10 @@ void loop() {
 		}
 	  }
 	}
- }
+	#if defined(EEPROM_RPI_simulated)
+	if (millis() % 200 == 0) EEPROM.commit();  // only writes data if there was a change (_dirty is set)
+	#endif
+} // loop()
 
 
 
@@ -938,7 +930,7 @@ void send_cmd()
 			MSG_PRINT(F("ccreg write back "));
 			for (uint8_t i=0;i<ccParamAnz;i++)
 			{
-				val = EepromPtr->read(0x0f + i);
+				val = EEPROM.read(0x0f + i);
 				printHex2(val);
 				cc1101::writeReg(0x0d + i, val);    // gemerkte Registerwerte zurueckschreiben
 			}
@@ -1090,8 +1082,8 @@ void cmd_bank()
 		bank = cc1101::hex2int(digit);
 		bankOffset = getBankOffset(bank);
 		if (cmdstring.charAt(2) == '-' && bank > 0 && bank != bankOld) {  // Bank deaktivieren (ungueltig)
-			EepromPtr->write(bankOffset, 255);
-			EepromPtr->write(bankOffset+1, 255);
+			EEPROM.write(bankOffset, 255);
+			EEPROM.write(bankOffset+1, 255);
 			MSG_PRINT(F("Bank "));
 			MSG_PRINT(bank);
 			MSG_PRINTLN(F(" clear"));
@@ -1099,17 +1091,17 @@ void cmd_bank()
 			bankOffset = bankOffsetOld;
 			return;
 		}
-		if (bank == 0 || cmdstring.charAt(0) == 'e' || (EepromPtr->read(bankOffset) == bank && EepromPtr->read(bankOffset + 1) == (255 - bank))) {
+		if (bank == 0 || cmdstring.charAt(0) == 'e' || (EEPROM.read(bankOffset) == bank && EEPROM.read(bankOffset + 1) == (255 - bank))) {
 		  if (cmdstring.charAt(2) == 'f') {
 			uint8_t ccmodeOld = ccmode;
-			ccmode = EepromPtr->read(bankOffset + addr_ccmode);
+			ccmode = EEPROM.read(bankOffset + addr_ccmode);
 			if (ccmodeOld > 0 && ccmode > 0) {
 				cc1101::ccStrobe_SIDLE();	// Idle mode
 				uint8_t val;
 				uint8_t n = 0;
 				for (uint8_t i = 0; i <= 0x26; i++) {
-					val = EepromPtr->read(bankOffset + 2 + i);
-					if (val != EepromPtr->read(bankOffsetOld + 2 + i)) {
+					val = EEPROM.read(bankOffset + 2 + i);
+					if (val != EEPROM.read(bankOffsetOld + 2 + i)) {
 						n++;
 						//printHex2(i);
 						//printHex2(val);
@@ -1134,15 +1126,15 @@ void cmd_bank()
 		  }
 		  else {
 			if (cmdstring.charAt(2) == 'W') {
-				EepromPtr->write(addr_bank, bank);
+				EEPROM.write(addr_bank, bank);
 				MSG_PRINT(F("write "));
 			}
 			MSG_PRINT(F("set "));
-			//ccN = EepromPtr->read(bankOffset + addr_ccN);
-			ccmode = EepromPtr->read(bankOffset + addr_ccmode);
+			//ccN = EEPROM.read(bankOffset + addr_ccN);
+			ccmode = EEPROM.read(bankOffset + addr_ccmode);
 			if (ccmode == 255) {
 				ccmode = 0;
-				EepromPtr->write(bankOffset + addr_ccmode, ccmode);
+				EEPROM.write(bankOffset + addr_ccmode, ccmode);
 			}
 			if (cmdstring.charAt(0) != 'e') {
 				print_Bank();
@@ -1186,11 +1178,11 @@ void print_ccconf(uint16_t bankOffs)
 	char hexString[6];
 	
 	MSG_PRINT(F(" sync="));
-	printHex2(EepromPtr->read(bankOffs + 2 + CC1101_SYNC1));
-	printHex2(EepromPtr->read(bankOffs + 2 + CC1101_SYNC0));
+	printHex2(EEPROM.read(bankOffs + 2 + CC1101_SYNC1));
+	printHex2(EEPROM.read(bankOffs + 2 + CC1101_SYNC0));
 	MSG_PRINT(F(" ccconf="));
 	for (uint8_t i = 0x0F; i <= 0x1F; i++) {
-		printHex2(EepromPtr->read(bankOffs + i));
+		printHex2(EEPROM.read(bankOffs + i));
 	}
 	MSG_PRINT(F(" boffs="));
 	sprintf(hexString, "%04X", bankOffs);
@@ -1199,7 +1191,7 @@ void print_ccconf(uint16_t bankOffs)
 
 void print_Bank()
 {
-	uint8_t tmp_ccN = EepromPtr->read(bankOffset + addr_ccN);
+	uint8_t tmp_ccN = EEPROM.read(bankOffset + addr_ccN);
 	
 	MSG_PRINT(F("b="));
 	MSG_PRINT(bank);
@@ -1231,9 +1223,9 @@ void print_bank_sum()	// bs - Banksummary
 		bankStr[i2+1] = ' ';
 		
 		sBankoff = getBankOffset(i);
-		if ((EepromPtr->read(sBankoff) == i && EepromPtr->read(sBankoff+1) == (255 - i)) || i == 0) {
-			Nstr[i2] = '0' + EepromPtr->read(sBankoff + addr_ccN);
-			sCcmode = EepromPtr->read(sBankoff + addr_ccmode);
+		if ((EEPROM.read(sBankoff) == i && EEPROM.read(sBankoff+1) == (255 - i)) || i == 0) {
+			Nstr[i2] = '0' + EEPROM.read(sBankoff + addr_ccN);
+			sCcmode = EEPROM.read(sBankoff + addr_ccmode);
 			if (sCcmode < 10) {
 				ccmodeStr[i2] = '0' + sCcmode;
 			}
@@ -1283,7 +1275,7 @@ void print_bank_sum()	// bs - Banksummary
 			}
 			else {
 				for (j = 0; j < 8; j++) {
-					ch = EepromPtr->read(addr_bankdescr + (i * 8) + j);
+					ch = EEPROM.read(addr_bankdescr + (i * 8) + j);
 					if ((ch >= 32 && ch <= 122) || ch == 0) {	// space to z
 						bankStr[j] = ch;
 						if (ch == 0) {	// end
@@ -1389,7 +1381,7 @@ void ccRegWrite()	// CW cc register write
 	bool flag = false;
 	bool resetFlag = false;
     
-	uint8_t CWccreset = EepromPtr->read(bankOffset + addr_CWccreset);
+	uint8_t CWccreset = EEPROM.read(bankOffset + addr_CWccreset);
 	if ((CWccreset == 0xA5 || CWccreset == 0xA6) &&  cmdstring.charAt(6) == ',') { 
 		cc1101::ccFactoryReset(false);
 		cc1101::CCinit();
@@ -1424,7 +1416,7 @@ void ccRegWrite()	// CW cc register write
 		}
 		if (reg < 0x40) {
 			if (reg != 0x2F) {	// bei Testregister kein write
-				EepromPtr->write(bankOffset + reg, val);
+				EEPROM.write(bankOffset + reg, val);
 				if (reg == 0x37) {		// Ende der patable
 					cc1101::writePatable();
 				}
@@ -1432,7 +1424,7 @@ void ccRegWrite()	// CW cc register write
 		}
 		else {		// 0x40 - 0x47  Bank Kurzbeschreibung (max 8 Zeichen)
 			reg = reg + (bank * 8);
-			EepromPtr->write(reg, val);
+			EEPROM.write(reg, val);
 		}
 		/*MSG_PRINT(F("reg="));
 		printHex2(reg);
@@ -1496,13 +1488,13 @@ void cmd_writeEEPROM()	// write EEPROM und CC11001 register
          reg = cmdstringPos2int(1);
          val = cmdstringPos2int(3);
          if (reg < 0x40) {
-           EepromPtr->write(bankOffset + reg, val);
+           EEPROM.write(bankOffset + reg, val);
            if (hasCC1101 && reg <= 0x2A) {  // nur bis cc1101_reg 0x28
              cc1101::writeReg(reg-2, val);
            }
          }
          else {   // ab 0x40 immer in Bank 0
-           EepromPtr->write(reg, val);
+           EEPROM.write(reg, val);
          }
          MSG_PRINT("W");
          printHex2(reg);
@@ -1533,7 +1525,7 @@ void cmd_readEEPROM()	// R<adr>  read EEPROM
 			MSG_PRINT(F(":"));
 			for (uint8_t i = 0; i < 16; i++) {
 				MSG_PRINT(F(" "));
-				printHex2(EepromPtr->read(addr + i));
+				printHex2(EEPROM.read(addr + i));
 			}
 			addr += 16;
 			MSG_PRINT(F("  "));
@@ -1549,11 +1541,11 @@ void cmd_readEEPROM()	// R<adr>  read EEPROM
          MSG_PRINT(F(" :"));
          for (uint8_t i = 0; i < 16; i++) {
              MSG_PRINT(F(" "));
-             printHex2(EepromPtr->read(bankOffset + reg + i));
+             printHex2(EEPROM.read(bankOffset + reg + i));
          }
      } else {
         MSG_PRINT(F(" = "));
-        printHex2(EepromPtr->read(bankOffset + reg));
+        printHex2(EEPROM.read(bankOffset + reg));
      }
      MSG_PRINTLN("");
   } else {
@@ -1591,13 +1583,13 @@ void cmd_ccFactoryReset()
          }
          cc1101::ccFactoryReset(true);
          cc1101::CCinit();
-         EepromPtr->write(bankOffset + addr_ccN, 0);
+         EEPROM.write(bankOffset + addr_ccN, 0);
          ccmode = 0;
-         EepromPtr->write(bankOffset + addr_ccmode, ccmode);
+         EEPROM.write(bankOffset + addr_ccmode, ccmode);
          setCCmode();
          if (bank > 0) {
-            EepromPtr->write(bankOffset, bank);
-            EepromPtr->write(bankOffset + 1, (255 - bank));
+            EEPROM.write(bankOffset, bank);
+            EEPROM.write(bankOffset + 1, (255 - bank));
          }
          if (cmdstring.charAt(0) == 'e') {
             print_Bank();
@@ -1741,18 +1733,18 @@ inline void configSET()
 				val = cmdstring.substring(i+1).toInt();
 				MSG_PRINTLN(val);
 				if (n == CSccmode || n == CSccN) {
-					EepromPtr->write(bankOffset + CSetAddr[n], val);
+					EEPROM.write(bankOffset + CSetAddr[n], val);
 				} else {
-					EepromPtr->write(CSetAddr[n], val);
+					EEPROM.write(CSetAddr[n], val);
 				}
 			}
 			else {
 				val16 = cmdstring.substring(i+1).toInt();
 				MSG_PRINTLN(val16);
 				val = (val16>>8) & 0xFF;
-				EepromPtr->write(CSetAddr[n+(n-CSet16)], val);		// high
+				EEPROM.write(CSetAddr[n+(n-CSet16)], val);		// high
 				val = val16 & 0xFF;
-				EepromPtr->write(CSetAddr[n+(n-CSet16)+1], val);	// low
+				EEPROM.write(CSetAddr[n+(n-CSet16)+1], val);	// low
 			}
 			break;
 		}
@@ -1963,7 +1955,7 @@ void storeFunctions(const int8_t ms, int8_t mu, int8_t mc, int8_t red, int8_t de
 	overfl=overfl<<6;
 	tgBank=tgBank<<7;
 	int8_t dat =  ms | mu | mc | red | deb | led | overfl | tgBank;
-    EepromPtr->write(addr_features,dat);
+    EEPROM.write(addr_features,dat);
 }
 
 void callGetFunctions(void)
@@ -1974,7 +1966,7 @@ void callGetFunctions(void)
 void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl, bool *tgBank)
 {
     int8_t high;
-    int8_t dat = EepromPtr->read(addr_features);
+    int8_t dat = EEPROM.read(addr_features);
 
     *ms=bool (dat &(1<<0));
     *mu=bool (dat &(1<<1));
@@ -1985,30 +1977,30 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
     *overfl=bool (dat &(1<<6));
     *tgBank= bool (dat &(1<<7));
     
-    MdebFifoLimit = EepromPtr->read(CSetAddr[0]);
-    musterDec.MsMoveCountmax = EepromPtr->read(CSetAddr[2]);
-    musterDec.MuOverflMax = EepromPtr->read(CSetAddr[3]);
-    musterDec.cMaxNumPattern = EepromPtr->read(CSetAddr[4]);
-    bank = EepromPtr->read(addr_bank);
+    MdebFifoLimit = EEPROM.read(CSetAddr[0]);
+    musterDec.MsMoveCountmax = EEPROM.read(CSetAddr[2]);
+    musterDec.MuOverflMax = EEPROM.read(CSetAddr[3]);
+    musterDec.cMaxNumPattern = EEPROM.read(CSetAddr[4]);
+    bank = EEPROM.read(addr_bank);
     if (bank > 9) {
       bank = 0;
     }
     bankOffset = getBankOffset(bank);
-    //ccN = EepromPtr->read(bankOffset + addr_ccN);
-    ccmode = EepromPtr->read(bankOffset + addr_ccmode);
+    //ccN = EEPROM.read(bankOffset + addr_ccN);
+    ccmode = EEPROM.read(bankOffset + addr_ccmode);
     if (ccmode == 255) {
        ccmode = 0;
-       EepromPtr->write(bankOffset + addr_ccmode, ccmode);
+       EEPROM.write(bankOffset + addr_ccmode, ccmode);
     }
-    high = EepromPtr->read(CSetAddr[CSet16]);
-    musterDec.MuSplitThresh = EepromPtr->read(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
-    high = EepromPtr->read(CSetAddr[CSet16+2]);
-    musterDec.cMaxPulse = EepromPtr->read(CSetAddr[CSet16+3]) + ((high << 8) & 0xFF00);
+    high = EEPROM.read(CSetAddr[CSet16]);
+    musterDec.MuSplitThresh = EEPROM.read(CSetAddr[CSet16+1]) + ((high << 8) & 0xFF00);
+    high = EEPROM.read(CSetAddr[CSet16+2]);
+    musterDec.cMaxPulse = EEPROM.read(CSetAddr[CSet16+3]) + ((high << 8) & 0xFF00);
     if (musterDec.cMaxPulse == 0) {
        musterDec.cMaxPulse = maxPulse;
     }
     musterDec.cMaxPulse = -musterDec.cMaxPulse;
-    musterDec.mcMinBitLen = EepromPtr->read(CSetAddr[1]);
+    musterDec.mcMinBitLen = EEPROM.read(CSetAddr[1]);
     if (musterDec.mcMinBitLen == 0) {
         musterDec.mcMinBitLen = mcMinBitLenDef;
     }
@@ -2016,18 +2008,18 @@ void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, b
 
 void initEEPROMconfig(void)
 {
-	EepromPtr->write(addr_features, 0x3F);    	// Init EEPROM with all flags enabled, except MuNoOverflow and toggleBank
+	EEPROM.write(addr_features, 0x3F);    	// Init EEPROM with all flags enabled, except MuNoOverflow and toggleBank
 	
 	for (uint8_t i = 0; i < CSetAnzEE; i++) {
-		EepromPtr->write(CSetAddr[i], CSetDef[i]);
+		EEPROM.write(CSetAddr[i], CSetDef[i]);
 	}
-	EepromPtr->write(addr_bank, 0);
+	EEPROM.write(addr_bank, 0);
 	MSG_PRINTLN(F("Init eeprom to defaults"));
 }
 
 void initEEPROM(void)
 {
-  if (EepromPtr->read(EE_MAGIC_OFFSET) == VERSION_1 && EepromPtr->read(EE_MAGIC_OFFSET+1) == VERSION_2) {
+  if (EEPROM.read(EE_MAGIC_OFFSET) == VERSION_1 && EEPROM.read(EE_MAGIC_OFFSET+1) == VERSION_2) {
     
   //if (musterDec.MdebEnabled) {
     #ifdef DEBUG
@@ -2039,12 +2031,12 @@ void initEEPROM(void)
     initEEPROMconfig();
     //storeFunctions(1, 1, 1);    // Init EEPROM with all flags enabled
     #ifdef CMP_CC1101
-       if (EepromPtr->read(EE_MAGIC_OFFSET) != VERSION_1) {  // ccFactoryReset nur wenn VERSION_1 nicht passt
+       if (EEPROM.read(EE_MAGIC_OFFSET) != VERSION_1) {  // ccFactoryReset nur wenn VERSION_1 nicht passt
           cc1101::ccFactoryReset(true);
        }
     #endif
-    EepromPtr->write(EE_MAGIC_OFFSET, VERSION_1);
-    EepromPtr->write(EE_MAGIC_OFFSET+1, VERSION_2);
+    EEPROM.write(EE_MAGIC_OFFSET, VERSION_1);
+    EEPROM.write(EE_MAGIC_OFFSET+1, VERSION_2);
   }
   callGetFunctions();
 }

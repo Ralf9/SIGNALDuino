@@ -303,7 +303,7 @@ namespace cc1101 {
 		//waitV_Miso();                                    // wait until MISO goes low
 		sendSPI(CC1101_PATABLE | CC1101_WRITE_BURST);   // send register address
 		for (uint8_t i = 0; i < 8; i++) {
-			sendSPI(EepromPtr->read(bankOffset + EE_CC1101_PA+i));                     // send value
+			sendSPI(EEPROM.read(bankOffset + EE_CC1101_PA+i));                     // send value
 		}
 			cc1101_Deselect();
 	}
@@ -412,9 +412,9 @@ namespace cc1101 {
 void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa ramping)
 	for (uint8_t i = 0; i < 8; i++) {
 		if (i == 1) {
-			EepromPtr->write(bankOffset + EE_CC1101_PA + i, var);
+			EEPROM.write(bankOffset + EE_CC1101_PA + i, var);
 		} else {
-			EepromPtr->write(bankOffset + EE_CC1101_PA + i, 0);
+			EEPROM.write(bankOffset + EE_CC1101_PA + i, 0);
 		}
 	}
 	writePatable();
@@ -423,21 +423,21 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 
 	void ccFactoryReset(bool flag) {
 		for (uint8_t i = 0; i<sizeof(initVal); i++) {
-			EepromPtr->write(bankOffset + EE_CC1101_CFG + i, pgm_read_byte(&initVal[i]));
+			EEPROM.write(bankOffset + EE_CC1101_CFG + i, pgm_read_byte(&initVal[i]));
 		}
-		EepromPtr->write(bankOffset + addr_CWccreset, 0xFF);
+		EEPROM.write(bankOffset + addr_CWccreset, 0xFF);
 		if (flag == false) {
 			return;
 		}
 		for (uint8_t i = 0; i < 8; i++) {
 			if (i == 1) {
 				if (bankOffset == 0) {	// Bank 0 normalerweise 433 Mhz
-					EepromPtr->write(bankOffset + EE_CC1101_PA + i, PATABLE_DEFAULT_433);
+					EEPROM.write(bankOffset + EE_CC1101_PA + i, PATABLE_DEFAULT_433);
 				} else {
-					EepromPtr->write(bankOffset + EE_CC1101_PA + i, PATABLE_DEFAULT_868);
+					EEPROM.write(bankOffset + EE_CC1101_PA + i, PATABLE_DEFAULT_868);
 				}
 			} else {
-				EepromPtr->write(bankOffset + EE_CC1101_PA + i, 0);
+				EEPROM.write(bankOffset + EE_CC1101_PA + i, 0);
 			}
 		}
 		MSG_PRINTLN(F("ccFactoryReset done"));  
@@ -662,14 +662,14 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 		
 		sendSPI(CC1101_WRITE_BURST);
 		for (uint8_t i = 0; i<sizeof(initVal); i++) {              // write EEPROM value to cc1101
-			sendSPI(EepromPtr->read(bankOffset + EE_CC1101_CFG + i));
+			sendSPI(EEPROM.read(bankOffset + EE_CC1101_CFG + i));
 		}
 		cc1101_Deselect();
 		delayMicroseconds(10);            // ### todo: welcher Wert ist als delay sinnvoll? ###
 
-		if (EepromPtr->read(bankOffset + addr_CWccreset) == 0xA5 && ((EepromPtr->read(bankOffset + addr_CWccTEST) & 0xF0) == 0x60)) {
+		if (EEPROM.read(bankOffset + addr_CWccreset) == 0xA5 && ((EEPROM.read(bankOffset + addr_CWccTEST) & 0xF0) == 0x60)) {
 			for (uint8_t i = 0; i<3; i++) {
-				writeReg(CC1101_TEST2 + i, EepromPtr->read(bankOffset + CC1101_TEST2 + i));
+				writeReg(CC1101_TEST2 + i, EEPROM.read(bankOffset + CC1101_TEST2 + i));
 			}
 		}
 		writePatable();                                 // write PatableArray to patable reg

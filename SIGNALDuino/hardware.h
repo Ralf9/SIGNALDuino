@@ -11,17 +11,16 @@
 
 #if defined (ARDUINO_ARCH_RP2040)
   #include <malloc.h>
-  // #include <Wire.h>
-  #include "extras/EEPROM24.h"
-  class EEPROM24;    // forward declare class
-  extern EEPROM24* EepromPtr;
-
+  // user "internal" EEPROM (simulated on flash memory)
+  #include <EEPROM.h>
+  #define EEPROM_RPI_simulated
+  #define EEPROM_RPI_size 1024
+  
   #ifndef NOT_A_PIN
   #define NOT_A_PIN 0xFF
   #endif
 #else
   #include <EEPROM.h>
-  extern EEPROMClass* EepromPtr;
 #endif
 
 /* watchdog macros, config, reboot and reset for SIGNALDuino*/

@@ -6,7 +6,7 @@
 //#define ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101 1
 //#define ARDUINO_BUSWARE_CUL 1                                 // BusWare CUL V3 (ATmega32U4)
 #define OTHER_BOARD_WITH_CC1101  1
-//#define RASPBERRY_PI_PICO 1     // make sure to have correct I2C EEPROM size set in main sketch (EEPROM24)
+// #define RASPBERRY_PI_PICO 1     // RP2040 (Pi Pico 1) Pico 2 may work but needs adjustemts
 
 
 //#define DEBUGSENDCMD  1
