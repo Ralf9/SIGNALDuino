@@ -35,7 +35,7 @@
 #include "compile_config.h"
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.5-dev241007"
+#define PROGVERS               "3.3.5-dev161125"
 #define VERSION_1               0x33
 #define VERSION_2               0x40
 
@@ -1325,12 +1325,17 @@ void cmd_Version()	// V: Version
 #ifdef ONLY_FSK
     MSG_PRINT(F("only xFSK "));
 #endif
-	MSG_PRINT(F("(b"));
-	if (toggleBankEnabled == false) {
-		MSG_PRINT(bank);
-	} else {
-		MSG_PRINT(F("x"));
+	if (RXenabled == true) {
+		MSG_PRINT(F("(B"));
 	}
+	else {
+		MSG_PRINT(F("(b"));
+	}
+	//if (toggleBankEnabled == false) {
+		MSG_PRINT(bank);
+	//} else {
+	//	MSG_PRINT(F("x"));
+	//}
 	MSG_PRINT(F(") "));
 	MSG_PRINTLN(F("- compiled at " __DATE__ " " __TIME__));
 }
@@ -1342,10 +1347,10 @@ void cmd_freeRam()	// R: FreeMemory
 
 void cmd_send()
 {
-	/*if (musterDec.getState() != searching )
+	if (musterDec.getState() != searching )
 	{
 		command_available=true;
-	} else {*/
+	} else {
 		if (cmdstring.charAt(1) != 'N') {
 			send_cmd(); // Part of Send
 		}
@@ -1357,7 +1362,7 @@ void cmd_send()
 				unsuppCmd = true;
 			}
 		}
-	//}
+	}
 }
 
 void cmd_uptime()	// t: Uptime
@@ -1365,9 +1370,15 @@ void cmd_uptime()	// t: Uptime
 	MSG_PRINTLN(getUptime());
 }
 
-void cmd_test()	// T<bank><sec>
+void cmd_test()
 {
-    unsuppCmd = true;
+	#ifdef ARDUINO
+		MSG_PRINT(F("a="));
+		MSG_PRINT(ARDUINO);
+		MSG_PRINTLN(F(" "));
+	#else
+		unsuppCmd = true;
+	#endif
 }
 
 void ccRegWrite()	// CW cc register write
