@@ -5,11 +5,13 @@
 
 #if defined(ARDUINO) && ARDUINO >= 100
 	#include "Arduino.h"
-#else
-	//#include "WProgram.h"
 #endif
-#include <EEPROM.h>
+
 #include "output.h"
+#include "hardware.h"
+#if defined(MAPLE_Mini) || defined(ESP32) || defined(ARDUINO_ARCH_RP2040)
+	#include <SPI.h>
+#endif
 
 #define ccMaxBuf 50
 extern uint16_t bankOffset;
@@ -207,10 +209,23 @@ namespace cc1101 {
 	}
 
 
-	uint8_t sendSPI(const uint8_t val) {					     // send byte via SPI
+	/*uint8_t sendSPI(const uint8_t val) {					     // send byte via SPI
 		SPDR = val;                                      // transfer byte via SPI
 		while (!(SPSR & _BV(SPIF)));                     // wait until SPI operation is terminated
 		return SPDR;
+	}*/
+	uint8_t sendSPI(const uint8_t val) {					     // send byte via SPI
+#ifdef MAPLE_Mini
+		return SPI_2.transfer(val);
+#elif defined(ESP32)
+		return SPI.transfer(val);
+#elif defined (ARDUINO_ARCH_RP2040)
+  return SPI.transfer(val);
+#else
+		SPDR = val;                                      // transfer byte via SPI
+		while (!(SPSR & _BV(SPIF)));                     // wait until SPI operation is terminated
+		return SPDR;
+#endif
 	}
 
 	uint8_t waitTo_Miso() {	// wait with timeout until MISO goes low
@@ -442,16 +457,29 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 	
 	inline void setup()
 	{
+	#ifdef MAPLE_Mini
+		// Setup SPI 2
+		SPI_2.begin();	//Initialize the SPI_2 port.
+		SPI_2.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+	#elif defined(ESP32)
+		SPI.begin(sckPin, misoPin, mosiPin, radioCsPin[0]);
+		SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+  	#elif defined (ARDUINO_ARCH_RP2040)
+	    SPI.begin();
+	    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+	#else
 		pinAsOutput(sckPin);
 		pinAsOutput(mosiPin);
 		pinAsInput(misoPin);
-		pinAsOutput(csPin);                    // set pins for SPI communication
+	#endif
+  	pinAsOutput(csPin);                    // set pins for SPI communication
+		digitalHigh(csPin);                 // SPI init
+
 		
 		#ifdef PIN_MARK433
 		pinAsInputPullUp(PIN_MARK433);
 		#endif
 		
-		SPCR = _BV(SPE) | _BV(MSTR);               // SPI speed = CLK/4
 		/*
 		SPCR = ((1 << SPE) |               		// SPI Enable
 		(0 << SPIE) |              		// SPI Interupt Enable
@@ -463,10 +491,13 @@ void writeCCpatable(uint8_t var) {           // write 8 byte to patable (kein pa
 
 		SPSR = (1 << SPI2X);             		// Double Clock Rate
 		*/
-		pinAsInput(PIN_SEND);        // gdo0Pi, sicherheitshalber bis zum CC1101 init erstmal input   
-		digitalHigh(csPin);                 // SPI init
+		//pinAsInput(PIN_SEND);        // gdo0Pi, sicherheitshalber bis zum CC1101 init erstmal input   
+
+	#if !defined(MAPLE_Mini) && !defined(ESP32) && !defined(ARDUINO_ARCH_RP2040)
+    SPCR = _BV(SPE) | _BV(MSTR);               // SPI speed = CLK/4
 		digitalHigh(sckPin);
 		digitalLow(mosiPin);
+	#endif
 	}
 
 	uint8_t getRSSI()

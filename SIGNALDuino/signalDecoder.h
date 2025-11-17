@@ -39,7 +39,7 @@
 
 #include "compile_config.h"
 
-#define DEBUG 1
+// #define DEBUG 1
 
 #include "output.h"
 #include "bitstore.h"

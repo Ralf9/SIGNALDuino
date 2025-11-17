@@ -5,7 +5,8 @@
 #define ARDUINO_ATMEGA328P_MINICUL 1
 //#define ARDUINO_AVR_ICT_BOARDS_ICT_BOARDS_AVR_RADINOCC1101 1
 //#define ARDUINO_BUSWARE_CUL 1                                 // BusWare CUL V3 (ATmega32U4)
-//#define OTHER_BOARD_WITH_CC1101  1
+// #define OTHER_BOARD_WITH_CC1101  1
+// #define RASPBERRY_PI_PICO 1     // RP2040 (Pi Pico 1) Pico 2 may work but needs adjustemts
 
 
 //#define DEBUGSENDCMD  1
@@ -18,6 +19,9 @@
 // Do not Change anything below this line
 
 #ifdef OTHER_BOARD_WITH_CC1101
+	#define CMP_CC1101
+#endif
+#ifdef RASPBERRY_PI_PICO
 	#define CMP_CC1101
 #endif
 #ifdef ARDUINO_ATMEGA328P_MINICUL

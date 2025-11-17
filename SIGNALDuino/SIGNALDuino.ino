@@ -35,7 +35,7 @@
 #include "compile_config.h"
 
 #define PROGNAME               "RF_RECEIVER"
-#define PROGVERS               "3.3.5-dev170225"
+#define PROGVERS               "3.3.5-dev161125"
 #define VERSION_1               0x33
 #define VERSION_2               0x40
 
@@ -60,10 +60,14 @@
 		#define PIN_SEND              2   // gdo0Pin TX out
 		#define PIN_RECEIVE           3
 		#define PIN_MARK433	      A0
+	#elif RASPBERRY_PI_PICO
+    // #define PIN_LED               LED_BUILTIN //25
+		#define PIN_SEND              20   // gdo0Pin TX out
+		#define PIN_RECEIVE           21   // gdo2
 	#else 
 		#define PIN_LED               9
 		#define PIN_SEND              3   // gdo0Pin TX out
-	    #define PIN_RECEIVE           2
+	  #define PIN_RECEIVE           2
 	#endif
 #else
 	#define PIN_RECEIVE            2
@@ -77,21 +81,24 @@
 
 #define DEBUG                  1
 
-#ifdef WATCHDOG
-	#include <avr/wdt.h>
-#endif
 #include "FastDelegate.h"
 #include "output.h"
 #include "bitstore.h"
 #include "signalDecoder.h"
-#include <TimerOne.h>  // Timer for LED Blinking
+
+#include "hardware.h"
+#if defined (ARDUINO_ARCH_RP2040)
+  #include <RPi_Pico_TimerInterrupt.h>  // https://github.com/khoih-prog/RPI_PICO_TimerInterrupt 
+  RPI_PICO_Timer ITimer1(1);
+#else
+  #include <TimerOne.h>  // Timer for LED Blinking
+#endif
+
 
 #include "SimpleFIFO.h"
 SimpleFIFO<int,FIFO_LENGTH> FiFo; //store FIFO_LENGTH # ints
 SignalDetectorClass musterDec;
 
-
-#include <EEPROM.h>
 #include "cc1101.h"
 
 #define pulseMin  90
@@ -102,14 +109,14 @@ SignalDetectorClass musterDec;
 #define maxSendEcho 100
 
 // EEProm Address
-#define EE_MAGIC_OFFSET      0
+static const uint8_t EE_MAGIC_OFFSET = 0;
 //#define addr_togglesec       0x3C
-#define addr_ccN             0x3D
-#define addr_ccmode          0x3E
+static const uint8_t addr_ccN = 0x3D;
+static const uint8_t addr_ccmode = 0x3E;
 //#define addr_featuresB       0x3F
-#define addr_bankdescr       0x40    // 0x40-0x47 bis Bank 9 0x88-0x8F  # Bank 0 bis Bank 9, Kurzbeschreibungen (max 8 Zeichen)
-#define addr_bank            0xFD
-#define addr_features        0xFF
+static const uint8_t addr_bankdescr = 0x40;    // 0x40-0x47 bis Bank 9 0x88-0x8F  # Bank 0 bis Bank 9, Kurzbeschreibungen (max 8 Zeichen)
+static const uint8_t addr_bank = 0xFD;
+static const uint8_t addr_features = 0xFF;
 
 volatile bool blinkLED = false;
 String cmdstring = "";
@@ -199,7 +206,7 @@ const char string_6[] PROGMEM = "ccmode";
 const char string_7[] PROGMEM = "muthresh";
 const char string_8[] PROGMEM = "maxpulse";
 
-const char * const CSetCmd[] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6, string_7, string_8};
+const char * const CSetCmd[CSetAnz] PROGMEM = { string_0, string_1, string_2, string_3, string_4, string_5, string_6, string_7, string_8};
 
 #ifdef CMP_MEMDBG
 
@@ -218,7 +225,6 @@ void check_mem() {
  stackptr =  (uint8_t *)(SP);           // save value of stack pointer
 }
 //extern int __bss_end;
-//extern void *__brkval;
 
 int get_free_memory()
 {
@@ -247,34 +253,53 @@ void handleInterrupt();
 void enableReceive();
 void disableReceive();
 void serialEvent();
+#if defined (ARDUINO_ARCH_RP2040)
+bool cronjob(struct repeating_timer *t);
+#else
 void cronjob();
+#endif
 int freeRam();
 void HandleCommand();
 bool command_available=false;
 unsigned long getUptime();
-void storeFunctions(const int8_t ms=1, int8_t mu=1, int8_t mc=1, int8_t red=1, int8_t deb=0, int8_t led=1, int8_t overfl=0);
-void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl);
+void storeFunctions(const int8_t ms=1, int8_t mu=1, int8_t mc=1, int8_t red=1, int8_t deb=0, int8_t led=1, int8_t overfl=0, int8_t tgBank=0);
+void getFunctions(bool *ms,bool *mu,bool *mc, bool *red, bool *deb, bool *led, bool *overfl, bool *tgBank);
 void initEEPROM(void);
+void initEEPROMconfig(void);
+void callGetFunctions(void);
+void print_bank_sum();
+void print_Bank();
+uint16_t getBankOffset(uint8_t tmpBank);
 void setCCmode();
 uint8_t cmdstringPos2int(uint8_t pos);
 void printHex2(const byte hex);
 uint8_t rssiCallback() { return 0; };	// Dummy return if no rssi value can be retrieved from receiver
 
 
+
 void setup() {
+	delay(500);
+  #ifdef DEBUG
+	delay(2000);
+  #endif
+#if defined (ARDUINO_ARCH_RP2040) and defined(EEPROM_RPI_simulated)
+	EEPROM.begin(EEPROM_RPI_size);
+#endif
 #if defined(ARDUINO_BUSWARE_CUL)
 	clock_prescale_set(clock_div_1);
 #endif
 	uint8_t ccVersion;
 	Serial.begin(BAUDRATE);
+  #if not defined (ARDUINO_ARCH_RP2040)
 	while (!Serial) {
 		; // wait for serial port to connect. Needed for native USB
 	}
+  #endif
 	//if (musterDec.MdebEnabled) {
 	DBG_PRINTLN(F("Using sFIFO"));
 	//}
 #ifdef WATCHDOG
-	if (MCUSR & (1 << WDRF)) {
+	if (WATCHDOG_CAUSED_RESET()) {
 		MSG_PRINTLN(F("Watchdog caused a reset"));
 	}
 	/*
@@ -288,16 +313,16 @@ void setup() {
 		DBG_PRINTLN("power on reset occured");
 	}
 	*/
-	wdt_reset();
+	RESET_WATCHDOG();
 
-	wdt_enable(WDTO_2S);  	// Enable Watchdog
+	ENABLE_WATCHDOG();  	// Enable Watchdog
 #endif
 	//delay(2000);
 	pinAsInput(PIN_RECEIVE);
 	pinAsOutput(PIN_LED);
 	// CC1101
 #ifdef WATCHDOG
-	wdt_reset();
+	RESET_WATCHDOG();
 #endif
 #ifdef CMP_CC1101
 	cc1101::setup();
@@ -337,8 +362,13 @@ void setup() {
 	}
 	delay(50);
 
-	Timer1.initialize(31*1000); //Interrupt wird jede 31 Millisekunden ausgeloest
-	Timer1.attachInterrupt(cronjob);
+	#if defined (ARDUINO_ARCH_RP2040)
+	  // RPI_PICO_Timer ITimer1(1);
+	  ITimer1.attachInterruptInterval(31*1000, cronjob);
+	#else
+		Timer1.initialize(31*1000); //Interrupt wird jede 31 Millisekunden ausgeloest
+		Timer1.attachInterrupt(cronjob);
+	#endif
 
 	cmdstring.reserve(maxCmdString);
 
@@ -361,7 +391,12 @@ void setup() {
 #endif
 }
 
+#if defined (ARDUINO_ARCH_RP2040)
+bool cronjob(struct repeating_timer *t) {
+	(void) t;
+#else
 void cronjob() {
+#endif
 	static uint16_t cnt0 = 0;
 	static uint8_t cnt1 = 0;
 	cli();
@@ -386,12 +421,14 @@ void cronjob() {
 			getUptime();
 		}
 	}
+  #if defined (ARDUINO_ARCH_RP2040)
+	return true;
+  #endif
 }
 
 
 void loop() {
 	static int aktVal=0;
-	bool state;
 	uint8_t fifoCount;
 	
 #ifdef __AVR_ATmega32U4__	
@@ -406,7 +443,7 @@ void loop() {
 		}
 	}
 #ifdef WATCHDOG
-	wdt_reset();
+	RESET_WATCHDOG();
 #endif
 #ifndef ONLY_FSK
   if (ccmode == 0) {
@@ -415,7 +452,7 @@ void loop() {
 	while (FiFo.count()>0 ) { //Puffer auslesen und an Dekoder uebergeben
 
 		aktVal=FiFo.dequeue();
-		state = musterDec.decode(&aktVal);
+		musterDec.decode(&aktVal);
 		if (musterDec.MdebEnabled && musterDec.printMsgSuccess) {
 			fifoCount = FiFo.count();
 			if (fifoCount > MdebFifoLimit) {
@@ -458,7 +495,7 @@ void loop() {
 		if (fifoBytes > 0) {
 			uint8_t marcstate;
 			bool appendRSSI = false;
-			uint8_t RSSI;
+			uint8_t RSSI = 0;
 			if ((EEPROM.read(bankOffset + 2 +CC1101_PKTCTRL1) & 4) == 4) {
 				appendRSSI = true;
 			}
@@ -541,7 +578,10 @@ void loop() {
 		}
 	  }
 	}
- }
+	#if defined(EEPROM_RPI_simulated)
+	if (millis() % 200 == 0) EEPROM.commit();  // only writes data if there was a change (_dirty is set)
+	#endif
+} // loop()
 
 
 
@@ -738,7 +778,7 @@ void send_cmd()
 	int16_t startdata=0;
 	uint8_t counter=0;
 	bool isCombined = false;
-	bool extraDelay = false;
+	// bool extraDelay = false;
 
 	s_sendcmd command[maxSendCmd];
 	command[0].datastart = 0;
@@ -816,7 +856,7 @@ void send_cmd()
 #endif
 		} else if (msg_cmd0 == 'C') {
 			command[cmdNo].sendclock = cmdstring.substring(startdata, start_pos-1).toInt();
-			extraDelay = true;
+			// extraDelay = true;
 #ifdef DEBUGSENDCMD
 			MSG_PRINT(F("C="));
 			MSG_PRINTLN(command[cmdNo].sendclock);
@@ -978,8 +1018,8 @@ void IT_CMDs();
 
 void HandleCommand()
 {
-	uint8_t reg;
-	uint8_t val;
+	// uint8_t reg;
+	// uint8_t val;
 	uint8_t i;
 	
 	for (i=0; i < cmdAnz; i++) {
@@ -1696,7 +1736,7 @@ inline void configSET()
 		unsuppCmd = true;
 	}
 	while (n < CSetAnz) {
-		strcpy_P(buffer, (char*)pgm_read_word(&(CSetCmd[n])));
+		strcpy_P(buffer, (char*)pgm_read_ptr(&(CSetCmd[n])));
 		if (cmdstring.substring(2, i) == buffer) {
 			MSG_PRINT(buffer);
 			MSG_PRINT(F("="));
@@ -1786,9 +1826,8 @@ void serialEvent()
   }
 }
 
-
 int freeRam () {
-#ifdef CMP_MEMDBG
+ #ifdef CMP_MEMDBG
 
  check_mem();
 
@@ -1843,13 +1882,19 @@ int freeRam () {
  MSG_PRINT("\nstack size=["); MSG_PRINT( stackSize, DEC ); MSG_PRINT("] bytes decimal");
  MSG_PRINT("\nfree size1=["); MSG_PRINT( freeMem1, DEC ); MSG_PRINT("] bytes decimal");
  MSG_PRINT("\nfree size2=["); MSG_PRINT( freeMem2, DEC ); MSG_PRINT("] bytes decimal");
+ return freeMem2;
 #else
+ #if defined (ARDUINO_ARCH_RP2040)
+  extern char __StackLimit, __bss_end__;
+  struct mallinfo mi = mallinfo();
+  return (int)((uint32_t)(&__StackLimit  - &__bss_end__) - mi.uordblks);
+ #else
   extern int __heap_start, *__brkval;
   int v;
   return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
+ #endif
 #endif // CMP_MEMDBG
-
- }
+}
 
 inline unsigned long getUptime()
 {
@@ -2006,3 +2051,4 @@ void initEEPROM(void)
   }
   callGetFunctions();
 }
+
