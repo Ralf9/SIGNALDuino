@@ -61,6 +61,7 @@ typedef struct RXinfoDescr {
     uint16 length;              // Total number of bytes to to be read from the RX FIFO
     uint16 bytesLeft;           // Bytes left to to be read from the RX FIFO
     uint8 *pByteIndex;          // Pointer to current position in the byte array
+    uint32_t startMillis;       // millis() bei Sync-Erkennung (Fix Paketende-Wettrennen)
     uint8 format;               // Infinite or fixed packet mode
     uint8 complete;             // Packet received complete
     uint8 mode;                 // S-mode or T-mode
@@ -240,6 +241,7 @@ void mbus_task(uint16_t Boffs_ccN) {
         case 1:       // RX active, awaiting SYNC
             if (isHigh(pinReceive[radionr])) {
                 RXinfo.state = 2;
+                RXinfo.startMillis = millis();
                 if (FSKdebug) {
                     MSG_PRINTLN(F("mbSyn"));
                 }
@@ -454,6 +456,22 @@ void mbus_task(uint16_t Boffs_ccN) {
         return;
     }
 
+    // Fix: waehrend ein Paket empfangen wird (state > 1), den Empfaenger NICHT neu starten.
+    // Sonst gibt es ein Wettrennen: Endet das Paket genau zwischen der GDO2-Abfrage oben und dem
+    // MARCSTATE-Lesen in mbus_on(), ist der Chip schon IDLE -> mbus_on() leert den FIFO und das
+    // vollstaendig empfangene Telegramm geht ohne Meldung verloren. Das Paketende erkennt die
+    // GDO2-Abfrage oben im naechsten Durchlauf. Absicherung: haengt ein Empfang laenger als 100 ms
+    // (laengstes Paket ca. 47 ms), wird trotzdem neu gestartet.
+    if (RXinfo.state > 1) {
+        if ((uint32_t)(millis() - RXinfo.startMillis) < 100) {
+            return;
+        }
+        if (FSKdebug) {
+            MSG_PRINTLN(F("mbTimeout"));
+        }
+        mbus_on( TRUE );   // haengender Empfang: Neustart erzwingen
+        return;
+    }
     mbus_on( FALSE );
 }
 
